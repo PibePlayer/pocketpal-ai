@@ -122,7 +122,15 @@
     "clearCachesConfirmMessage": "This will clear all cached session data ({{fileCount}} files, {{size}}). Shortcuts may be slower on first use after clearing. This won't affect your Pals or chat history.",
     "clearCachesSuccess": "Successfully cleared {{count}} cache file(s).",
     "clearCachesError": "Failed to clear caches. Please try again.",
-    "noCachesToClear": "No caches to clear."
+    "noCachesToClear": "No caches to clear.",
+    "storageSettings": "Storage Settings",
+    "downloadDirectory": "Download Directory",
+    "downloadDirectoryDescription": "Location where new GGUF files will be downloaded. Files already downloaded remain at their current locations.",
+    "downloadDirectoryDefault": "Default (App Storage)",
+    "changeDirectory": "Change",
+    "resetToDefault": "Reset",
+    "downloadDirectoryWarning": "Existing downloaded models remain at their current locations.",
+    "directoryPickerError": "Failed to select directory. Please try again."
   },
   "memory": {
     "shortWarning": "Memory Warning",

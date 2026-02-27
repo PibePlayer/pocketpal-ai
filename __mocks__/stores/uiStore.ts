@@ -31,4 +31,7 @@ export const mockUiStore = {
   setDisplayMemUsage: jest.fn(),
   setBenchmarkShareDialogPreference: jest.fn(),
   showError: jest.fn(),
+  customModelsDir: undefined as string | undefined,
+  modelsBaseDir: '/path/to/documents',
+  setCustomModelsDir: jest.fn(),
 };

@@ -1,8 +1,9 @@
-import {Appearance} from 'react-native';
+import {Appearance, Platform} from 'react-native';
 
 import {makePersistable} from 'mobx-persist-store';
 import {makeAutoObservable, runInAction} from 'mobx';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as RNFS from '@dr.pogodin/react-native-fs';
 import {
   l10n,
   supportedLanguages as localesSupportedLanguages,
@@ -44,6 +45,13 @@ export class UIStore {
 
   iOSBackgroundDownloading = true;
 
+  /**
+   * Custom directory for downloading GGUF model files (Android only).
+   * When undefined, defaults to RNFS.DocumentDirectoryPath.
+   * Persisted via AsyncStorage.
+   */
+  customModelsDir: string | undefined = undefined;
+
   benchmarkShareDialog = {
     shouldShow: true,
   };
@@ -79,6 +87,7 @@ export class UIStore {
         'displayMemUsage',
         'benchmarkShareDialog',
         '_language',
+        'customModelsDir',
       ],
       storage: AsyncStorage,
     });
@@ -144,6 +153,28 @@ export class UIStore {
     runInAction(() => {
       this.benchmarkShareDialog.shouldShow = shouldShow;
     });
+  }
+
+  /**
+   * Sets a custom directory for downloading GGUF model files (Android only).
+   * Pass undefined to reset to the default DocumentDirectoryPath.
+   */
+  setCustomModelsDir(path: string | undefined) {
+    runInAction(() => {
+      this.customModelsDir = path;
+    });
+  }
+
+  /**
+   * Returns the base directory for model storage.
+   * On Android: returns customModelsDir if set, otherwise DocumentDirectoryPath.
+   * On iOS: always returns DocumentDirectoryPath (custom dir not supported).
+   */
+  get modelsBaseDir(): string {
+    if (Platform.OS === 'android' && this.customModelsDir) {
+      return this.customModelsDir;
+    }
+    return RNFS.DocumentDirectoryPath;
   }
 }
 

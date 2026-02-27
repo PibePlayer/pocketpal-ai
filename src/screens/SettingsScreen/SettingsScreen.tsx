@@ -15,6 +15,7 @@ import {debounce} from 'lodash';
 import {observer} from 'mobx-react-lite';
 import {toJS} from 'mobx';
 import {SafeAreaView} from 'react-native-safe-area-context';
+import {pickDirectory} from '@react-native-documents/picker';
 import {
   Switch,
   Text,
@@ -1140,6 +1141,76 @@ export const SettingsScreen: React.FC = observer(() => {
                       {l10n.settings.clearCachesButton}
                     </Button>
                   </View>
+                </View>
+              </Card.Content>
+            </Card>
+          )}
+
+          {/* Storage Settings - Android only */}
+          {Platform.OS === 'android' && (
+            <Card elevation={0} style={styles.card}>
+              <Card.Title title={l10n.settings.storageSettings} />
+              <Card.Content>
+                <View style={styles.settingItemContainer}>
+                  <Text variant="titleMedium" style={styles.textLabel}>
+                    {l10n.settings.downloadDirectory}
+                  </Text>
+                  <Text variant="labelSmall" style={styles.textDescription}>
+                    {l10n.settings.downloadDirectoryDescription}
+                  </Text>
+                  <Text
+                    variant="bodySmall"
+                    style={[styles.textDescription, {marginTop: 4}]}
+                    numberOfLines={2}>
+                    {uiStore.customModelsDir ||
+                      l10n.settings.downloadDirectoryDefault}
+                  </Text>
+                  <View style={[styles.switchContainer, {marginTop: 8}]}>
+                    <Button
+                      mode="outlined"
+                      style={styles.menuButton}
+                      onPress={async () => {
+                        try {
+                          const result = await pickDirectory();
+                          if (result?.uri) {
+                            // Resolve the content:// URI to a real filesystem path.
+                            // RNFS.stat() on Android returns originalFilepath for
+                            // content:// URIs, which is the real FS path.
+                            const RNFS_mod = await import(
+                              '@dr.pogodin/react-native-fs'
+                            );
+                            const statResult = await RNFS_mod.stat(result.uri);
+                            const realPath =
+                              (statResult as any).originalFilepath ||
+                              statResult.path;
+                            uiStore.setCustomModelsDir(realPath);
+                          }
+                        } catch (e: any) {
+                          // User cancelled or error occurred
+                          if (e?.code !== 'DOCUMENT_PICKER_CANCELED') {
+                            Alert.alert(
+                              l10n.settings.storageSettings,
+                              l10n.settings.directoryPickerError,
+                            );
+                          }
+                        }
+                      }}>
+                      {l10n.settings.changeDirectory}
+                    </Button>
+                    {uiStore.customModelsDir && (
+                      <Button
+                        mode="outlined"
+                        style={styles.menuButton}
+                        onPress={() => uiStore.setCustomModelsDir(undefined)}>
+                        {l10n.settings.resetToDefault}
+                      </Button>
+                    )}
+                  </View>
+                  <Text
+                    variant="labelSmall"
+                    style={[styles.textDescription, {marginTop: 8}]}>
+                    {l10n.settings.downloadDirectoryWarning}
+                  </Text>
                 </View>
               </Card.Content>
             </Card>

@@ -1,5 +1,5 @@
 import React from 'react';
-import {Alert} from 'react-native';
+import {Alert, Platform} from 'react-native';
 
 import * as RNFS from '@dr.pogodin/react-native-fs';
 import {pick} from '@react-native-documents/picker';
@@ -336,6 +336,126 @@ describe('ModelsScreen', () => {
       // Not downloaded model should be visible after expanding the group
       await waitFor(() => {
         expect(getByText('basic model')).toBeTruthy();
+      });
+    });
+  });
+
+  describe('In-place local model loading (Android custom dir)', () => {
+    beforeEach(() => {
+      jest.clearAllMocks();
+      // Reset modelsBaseDir to default
+      uiStore.modelsBaseDir = '/path/to/documents';
+      uiStore.customModelsDir = undefined;
+    });
+
+    afterEach(() => {
+      uiStore.modelsBaseDir = '/path/to/documents';
+      uiStore.customModelsDir = undefined;
+    });
+
+    it('uses file in-place when picked file is inside the configured base dir on Android', async () => {
+      // Set custom base dir
+      uiStore.modelsBaseDir = '/custom/storage';
+
+      // Mock Platform.OS to android
+      const originalOS = Platform.OS;
+      Object.defineProperty(Platform, 'OS', {value: 'android', writable: true});
+
+      (pick as jest.Mock).mockResolvedValue([
+        {
+          uri: '/custom/storage/models/mymodel.gguf',
+          name: 'mymodel.gguf',
+        },
+      ]);
+
+      const {getByTestId} = render(<ModelsScreen />);
+
+      const fabGroup = getByTestId('fab-group');
+      fireEvent.press(fabGroup);
+
+      await waitFor(() => {
+        const localFab = getByTestId('local-fab', {includeHiddenElements: true});
+        expect(localFab).toBeTruthy();
+      });
+      const addLocalModelButton = getByTestId('local-fab', {
+        includeHiddenElements: true,
+      });
+
+      await act(async () => {
+        fireEvent.press(addLocalModelButton);
+      });
+
+      await waitFor(() => {
+        // Should NOT copy the file
+        expect(RNFS.copyFile).not.toHaveBeenCalled();
+        // Should add the model directly with the original path
+        expect(modelStore.addLocalModel).toHaveBeenCalledWith(
+          '/custom/storage/models/mymodel.gguf',
+        );
+      });
+
+      // Restore Platform.OS
+      Object.defineProperty(Platform, 'OS', {
+        value: originalOS,
+        writable: true,
+      });
+    });
+
+    it('copies file when picked file is outside the configured base dir on Android', async () => {
+      // Set custom base dir
+      uiStore.modelsBaseDir = '/custom/storage';
+
+      // Mock Platform.OS to android
+      const originalOS = Platform.OS;
+      Object.defineProperty(Platform, 'OS', {value: 'android', writable: true});
+
+      (pick as jest.Mock).mockResolvedValue([
+        {
+          uri: '/downloads/mymodel.gguf',
+          name: 'mymodel.gguf',
+        },
+      ]);
+
+      // Mock RNFS.exists to return false for destination path
+      (RNFS.exists as jest.Mock).mockImplementation(async (path: string) => {
+        if (path.includes('/custom/storage/models/local/mymodel.gguf')) {
+          return false;
+        }
+        return false;
+      });
+
+      const {getByTestId} = render(<ModelsScreen />);
+
+      const fabGroup = getByTestId('fab-group');
+      fireEvent.press(fabGroup);
+
+      await waitFor(() => {
+        const localFab = getByTestId('local-fab', {includeHiddenElements: true});
+        expect(localFab).toBeTruthy();
+      });
+      const addLocalModelButton = getByTestId('local-fab', {
+        includeHiddenElements: true,
+      });
+
+      await act(async () => {
+        fireEvent.press(addLocalModelButton);
+      });
+
+      await waitFor(() => {
+        // Should copy the file to the custom base dir
+        expect(RNFS.copyFile).toHaveBeenCalledWith(
+          '/downloads/mymodel.gguf',
+          '/custom/storage/models/local/mymodel.gguf',
+        );
+        expect(modelStore.addLocalModel).toHaveBeenCalledWith(
+          '/custom/storage/models/local/mymodel.gguf',
+        );
+      });
+
+      // Restore Platform.OS
+      Object.defineProperty(Platform, 'OS', {
+        value: originalOS,
+        writable: true,
       });
     });
   });

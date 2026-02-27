@@ -162,7 +162,17 @@ export const ModelsScreen: React.FC = observer(() => {
           let fileName =
             file.name || file.uri.split('/').pop() || `file_${uuidv4()}`;
 
-          const permanentDir = `${RNFS.DocumentDirectoryPath}/models/local`;
+          // On Android, if the picked file is already inside the configured
+          // models base directory, use it in-place (no copy needed).
+          // This avoids duplicating large GGUF files on scoped storage.
+          const baseDir = uiStore.modelsBaseDir;
+          if (Platform.OS === 'android' && file.uri.startsWith(baseDir)) {
+            await modelStore.addLocalModel(file.uri);
+            setTrigger(prev => !prev);
+            return;
+          }
+
+          const permanentDir = `${baseDir}/models/local`;
           let permanentPath = `${permanentDir}/${fileName}`;
           if (!(await RNFS.exists(permanentDir))) {
             await RNFS.mkdir(permanentDir);

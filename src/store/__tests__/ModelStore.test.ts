@@ -2925,4 +2925,193 @@ describe('ModelStore', () => {
       );
     });
   });
+
+  describe('getModelFullPath - custom models directory (Android)', () => {
+    beforeEach(() => {
+      jest.clearAllMocks();
+      (RNFS as any).__resetMockState?.();
+      // Reset custom dir
+      uiStore.setCustomModelsDir(undefined);
+    });
+
+    afterEach(() => {
+      uiStore.setCustomModelsDir(undefined);
+    });
+
+    it('should use custom modelsBaseDir for new PRESET model downloads', async () => {
+      const presetModel = {
+        origin: ModelOrigin.PRESET,
+        filename: 'model.gguf',
+        author: 'test-author',
+        repo: 'test-repo',
+      };
+
+      // Simulate custom dir set in uiStore (Android platform)
+      // We mock Platform.OS to android for this test
+      const Platform = require('react-native').Platform;
+      const originalOS = Platform.OS;
+      Platform.OS = 'android';
+      uiStore.setCustomModelsDir('/custom/storage');
+
+      // Mock: no file exists at any legacy path
+      (RNFS.exists as jest.Mock).mockResolvedValue(false);
+
+      const path = await modelStore.getModelFullPath(presetModel as any);
+      expect(path).toBe(
+        '/custom/storage/models/preset/test-author/test-repo/model.gguf',
+      );
+
+      // Restore
+      Platform.OS = originalOS;
+      uiStore.setCustomModelsDir(undefined);
+    });
+
+    it('should use custom modelsBaseDir for new HF model downloads', async () => {
+      const hfModel = {
+        origin: ModelOrigin.HF,
+        filename: 'model.gguf',
+        author: 'test-author',
+        repo: 'test-repo',
+      };
+
+      // Simulate custom dir set in uiStore (Android platform)
+      const Platform = require('react-native').Platform;
+      const originalOS = Platform.OS;
+      Platform.OS = 'android';
+      uiStore.setCustomModelsDir('/custom/storage');
+
+      // Mock: no file exists at any legacy path
+      (RNFS.exists as jest.Mock).mockResolvedValue(false);
+
+      const path = await modelStore.getModelFullPath(hfModel as any);
+      expect(path).toBe(
+        '/custom/storage/models/hf/test-author/test-repo/model.gguf',
+      );
+
+      // Restore
+      Platform.OS = originalOS;
+      uiStore.setCustomModelsDir(undefined);
+    });
+
+    it('should still find legacy PRESET files at DocumentDirectoryPath even when custom dir is set', async () => {
+      const presetModel = {
+        origin: ModelOrigin.PRESET,
+        filename: 'model.gguf',
+        author: 'test-author',
+        repo: 'test-repo',
+      };
+
+      // Simulate custom dir set in uiStore (Android platform)
+      const Platform = require('react-native').Platform;
+      const originalOS = Platform.OS;
+      Platform.OS = 'android';
+      uiStore.setCustomModelsDir('/custom/storage');
+
+      // Mock: old path at DocumentDirectoryPath exists (legacy file)
+      (RNFS.exists as jest.Mock).mockImplementation(async (p: string) => {
+        return p === '/path/to/documents/models/preset/test-author/model.gguf';
+      });
+
+      const path = await modelStore.getModelFullPath(presetModel as any);
+      // Should return the legacy path, not the custom dir path
+      expect(path).toBe(
+        '/path/to/documents/models/preset/test-author/model.gguf',
+      );
+
+      // Restore
+      Platform.OS = originalOS;
+      uiStore.setCustomModelsDir(undefined);
+    });
+
+    it('should still find legacy HF files at DocumentDirectoryPath even when custom dir is set', async () => {
+      const hfModel = {
+        origin: ModelOrigin.HF,
+        filename: 'model.gguf',
+        author: 'test-author',
+        repo: 'test-repo',
+      };
+
+      // Simulate custom dir set in uiStore (Android platform)
+      const Platform = require('react-native').Platform;
+      const originalOS = Platform.OS;
+      Platform.OS = 'android';
+      uiStore.setCustomModelsDir('/custom/storage');
+
+      // Mock: old path at DocumentDirectoryPath exists (legacy file)
+      (RNFS.exists as jest.Mock).mockImplementation(async (p: string) => {
+        return p === '/path/to/documents/models/hf/test-author/model.gguf';
+      });
+
+      const path = await modelStore.getModelFullPath(hfModel as any);
+      // Should return the legacy path, not the custom dir path
+      expect(path).toBe('/path/to/documents/models/hf/test-author/model.gguf');
+
+      // Restore
+      Platform.OS = originalOS;
+      uiStore.setCustomModelsDir(undefined);
+    });
+
+    it('should find existing file in custom dir for PRESET model', async () => {
+      const presetModel = {
+        origin: ModelOrigin.PRESET,
+        filename: 'model.gguf',
+        author: 'test-author',
+        repo: 'test-repo',
+      };
+
+      // Simulate custom dir set in uiStore (Android platform)
+      const Platform = require('react-native').Platform;
+      const originalOS = Platform.OS;
+      Platform.OS = 'android';
+      uiStore.setCustomModelsDir('/custom/storage');
+
+      // Mock: file exists in custom dir but not at legacy paths
+      (RNFS.exists as jest.Mock).mockImplementation(async (p: string) => {
+        return (
+          p ===
+          '/custom/storage/models/preset/test-author/test-repo/model.gguf'
+        );
+      });
+
+      const path = await modelStore.getModelFullPath(presetModel as any);
+      expect(path).toBe(
+        '/custom/storage/models/preset/test-author/test-repo/model.gguf',
+      );
+
+      // Restore
+      Platform.OS = originalOS;
+      uiStore.setCustomModelsDir(undefined);
+    });
+
+    it('should find existing file in custom dir for HF model', async () => {
+      const hfModel = {
+        origin: ModelOrigin.HF,
+        filename: 'model.gguf',
+        author: 'test-author',
+        repo: 'test-repo',
+      };
+
+      // Simulate custom dir set in uiStore (Android platform)
+      const Platform = require('react-native').Platform;
+      const originalOS = Platform.OS;
+      Platform.OS = 'android';
+      uiStore.setCustomModelsDir('/custom/storage');
+
+      // Mock: file exists in custom dir but not at legacy paths
+      (RNFS.exists as jest.Mock).mockImplementation(async (p: string) => {
+        return (
+          p === '/custom/storage/models/hf/test-author/test-repo/model.gguf'
+        );
+      });
+
+      const path = await modelStore.getModelFullPath(hfModel as any);
+      expect(path).toBe(
+        '/custom/storage/models/hf/test-author/test-repo/model.gguf',
+      );
+
+      // Restore
+      Platform.OS = originalOS;
+      uiStore.setCustomModelsDir(undefined);
+    });
+  });
 });

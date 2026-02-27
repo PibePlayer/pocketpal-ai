@@ -697,8 +697,12 @@ class ModelStore {
    * Path structure varies by model origin:
    * - LOCAL: Uses the model's fullPath property
    * - PRESET: Checks both legacy path (DocumentDirectoryPath/filename) and
-   *          new path (DocumentDirectoryPath/models/preset/author/filename)
-   * - HF: Uses DocumentDirectoryPath/models/hf/author/filename
+   *          new path ({modelsBaseDir}/models/preset/author/repo/filename)
+   * - HF: Uses {modelsBaseDir}/models/hf/author/repo/filename
+   *
+   * Legacy backwards-compat checks always use DocumentDirectoryPath (where existing
+   * downloads live). New downloads go to uiStore.modelsBaseDir (which may be a
+   * user-configured custom directory on Android).
    *
    * IMPORTANT: This logic is duplicated in native Swift code for iOS Shortcuts
    * See: ios/PocketPal/AppIntents/PalDataProvider.swift - parseModelPath() method
@@ -721,19 +725,25 @@ class ModelStore {
       throw new Error('Model filename is undefined');
     }
 
+    // The base directory for new downloads (may be user-configured on Android)
+    const modelsBaseDir = uiStore.modelsBaseDir;
+
     // For preset models, check both old and new paths
     if (model.origin === ModelOrigin.PRESET) {
       const author = model.author || 'unknown';
       const repo = model.repo || 'unknown';
 
       // Very old path (deprecated, for backwards compatibility)
+      // Always checked against DocumentDirectoryPath since that's where old files live
       const veryOldPath = `${RNFS.DocumentDirectoryPath}/${model.filename}`;
 
       // Old path (deprecated, for backwards compatibility)
+      // Always checked against DocumentDirectoryPath since that's where old files live
       const oldPath = `${RNFS.DocumentDirectoryPath}/models/preset/${author}/${model.filename}`;
 
       // New path structure includes repository name
-      const newPath = `${RNFS.DocumentDirectoryPath}/models/preset/${author}/${repo}/${model.filename}`;
+      // Uses modelsBaseDir so new downloads go to the configured directory
+      const newPath = `${modelsBaseDir}/models/preset/${author}/${repo}/${model.filename}`;
 
       // Check if file exists at very old path first (for backwards compatibility)
       try {
@@ -753,7 +763,19 @@ class ModelStore {
         console.log('Error checking old preset path:', err);
       }
 
-      // Otherwise use new path
+      // If a custom dir is configured, also check if file already exists there
+      // (handles re-downloads after changing the download directory)
+      if (modelsBaseDir !== RNFS.DocumentDirectoryPath) {
+        try {
+          if (await RNFS.exists(newPath)) {
+            return newPath;
+          }
+        } catch (err) {
+          console.log('Error checking custom dir preset path:', err);
+        }
+      }
+
+      // Otherwise use new path (destination for new downloads)
       return newPath;
     }
 
@@ -768,10 +790,12 @@ class ModelStore {
       }
 
       // Old path structure (for backwards compatibility)
+      // Always checked against DocumentDirectoryPath since that's where old files live
       const oldPath = `${RNFS.DocumentDirectoryPath}/models/hf/${author}/${model.filename}`;
 
       // New path structure includes repository name
-      const newPath = `${RNFS.DocumentDirectoryPath}/models/hf/${author}/${repo}/${model.filename}`;
+      // Uses modelsBaseDir so new downloads go to the configured directory
+      const newPath = `${modelsBaseDir}/models/hf/${author}/${repo}/${model.filename}`;
 
       // Check if file exists at old path (backwards compatibility)
       // This handles: existing downloads, models after reset, models after app update
@@ -783,13 +807,25 @@ class ModelStore {
         console.log('Error checking old HF model path:', err);
       }
 
-      // Otherwise use new path
+      // If a custom dir is configured, also check if file already exists there
+      // (handles re-downloads after changing the download directory)
+      if (modelsBaseDir !== RNFS.DocumentDirectoryPath) {
+        try {
+          if (await RNFS.exists(newPath)) {
+            return newPath;
+          }
+        } catch (err) {
+          console.log('Error checking custom dir HF path:', err);
+        }
+      }
+
+      // Otherwise use new path (destination for new downloads)
       return newPath;
     }
 
     // Fallback (shouldn't reach here)
     console.error('should not reach here. model: ', model);
-    return `${RNFS.DocumentDirectoryPath}/${model.filename}`;
+    return `${modelsBaseDir}/${model.filename}`;
   };
 
   async checkFileExists(model: Model) {
