@@ -344,18 +344,18 @@ describe('ModelsScreen', () => {
     beforeEach(() => {
       jest.clearAllMocks();
       // Reset modelsBaseDir to default
-      uiStore.modelsBaseDir = '/path/to/documents';
+      (uiStore as any).modelsBaseDir = '/path/to/documents';
       uiStore.customModelsDir = undefined;
     });
 
     afterEach(() => {
-      uiStore.modelsBaseDir = '/path/to/documents';
+      (uiStore as any).modelsBaseDir = '/path/to/documents';
       uiStore.customModelsDir = undefined;
     });
 
     it('uses file in-place when picked file is inside the configured base dir on Android', async () => {
       // Set custom base dir
-      uiStore.modelsBaseDir = '/custom/storage';
+      (uiStore as any).modelsBaseDir = '/custom/storage';
 
       // Mock Platform.OS to android
       const originalOS = Platform.OS;
@@ -405,7 +405,7 @@ describe('ModelsScreen', () => {
 
     it('copies file when picked file is outside the configured base dir on Android', async () => {
       // Set custom base dir
-      uiStore.modelsBaseDir = '/custom/storage';
+      (uiStore as any).modelsBaseDir = '/custom/storage';
 
       // Mock Platform.OS to android
       const originalOS = Platform.OS;
