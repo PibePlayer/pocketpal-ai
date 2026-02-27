@@ -116,6 +116,29 @@ const resolveContentUri = (uri: string): string | null => {
   }
 };
 
+/**
+ * Tests whether the app can write to the given directory path.
+ * On Android 10+, writing to shared external storage (e.g. /storage/emulated/0/Download)
+ * requires WRITE_EXTERNAL_STORAGE permission which is not granted.
+ * Only app-specific directories are writable without special permissions.
+ *
+ * Returns true if the directory is writable, false otherwise.
+ */
+const testDirectoryWritable = async (dirPath: string): Promise<boolean> => {
+  try {
+    const RNFS_mod = await import('@dr.pogodin/react-native-fs');
+    const testFile = `${dirPath}/.pocketpal_write_test`;
+    // Try to write a small test file
+    await RNFS_mod.writeFile(testFile, 'test', 'utf8');
+    // Clean up
+    await RNFS_mod.unlink(testFile);
+    return true;
+  } catch (err) {
+    console.log('Directory write test failed:', err);
+    return false;
+  }
+};
+
 export const SettingsScreen: React.FC = observer(() => {
   const l10n = useContext(L10nContext);
   const theme = useTheme();
@@ -1225,8 +1248,34 @@ export const SettingsScreen: React.FC = observer(() => {
                             //   content://com.android.externalstorage.documents/tree/primary%3ADownload
                             // We decode and parse it to get the real FS path.
                             const realPath = resolveContentUri(result.uri);
+                            console.log(
+                              '[SettingsScreen] Resolved directory URI:',
+                              result.uri,
+                              '→',
+                              realPath,
+                            );
                             if (realPath) {
-                              uiStore.setCustomModelsDir(realPath);
+                              // Validate that the app can actually write to this path.
+                              // On Android 10+, shared external storage paths like
+                              // /storage/emulated/0/Download require WRITE_EXTERNAL_STORAGE
+                              // which is not granted. Only app-specific directories work.
+                              const writable =
+                                await testDirectoryWritable(realPath);
+                              console.log(
+                                '[SettingsScreen] Directory writable:',
+                                writable,
+                                'path:',
+                                realPath,
+                              );
+                              if (writable) {
+                                uiStore.setCustomModelsDir(realPath);
+                              } else {
+                                Alert.alert(
+                                  l10n.settings.storageSettings,
+                                  l10n.settings.directoryPermissionError ||
+                                    'The app does not have permission to write to this directory. Please select a directory within the app storage or SD card app folder.',
+                                );
+                              }
                             } else {
                               Alert.alert(
                                 l10n.settings.storageSettings,

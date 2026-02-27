@@ -130,7 +130,8 @@
     "changeDirectory": "Change",
     "resetToDefault": "Reset",
     "downloadDirectoryWarning": "Existing downloaded models remain at their current locations.",
-    "directoryPickerError": "Failed to select directory. Please try again."
+    "directoryPickerError": "Failed to select directory. Please try again.",
+    "directoryPermissionError": "The app cannot write to this directory. On Android 10+, only app-specific storage is writable. Please select a folder inside 'Android/data/com.pocketpalai/files/' or use the default storage."
   },
   "memory": {
     "shortWarning": "Memory Warning",
@@ -858,12 +859,7 @@
         "total": "Total: ",
         "usage": "Usage: "
       },
-      "byteSizes": [
-        "Bytes",
-        "KB",
-        "MB",
-        "GB"
-      ]
+      "byteSizes": ["Bytes", "KB", "MB", "GB"]
     },
     "chatView": {
       "menuItems": {
