@@ -3068,8 +3068,7 @@ describe('ModelStore', () => {
       // Mock: file exists in custom dir but not at legacy paths
       (RNFS.exists as jest.Mock).mockImplementation(async (p: string) => {
         return (
-          p ===
-          '/custom/storage/models/preset/test-author/test-repo/model.gguf'
+          p === '/custom/storage/models/preset/test-author/test-repo/model.gguf'
         );
       });
 

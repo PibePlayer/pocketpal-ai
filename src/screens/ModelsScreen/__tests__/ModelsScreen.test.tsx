@@ -374,7 +374,9 @@ describe('ModelsScreen', () => {
       fireEvent.press(fabGroup);
 
       await waitFor(() => {
-        const localFab = getByTestId('local-fab', {includeHiddenElements: true});
+        const localFab = getByTestId('local-fab', {
+          includeHiddenElements: true,
+        });
         expect(localFab).toBeTruthy();
       });
       const addLocalModelButton = getByTestId('local-fab', {
@@ -430,7 +432,9 @@ describe('ModelsScreen', () => {
       fireEvent.press(fabGroup);
 
       await waitFor(() => {
-        const localFab = getByTestId('local-fab', {includeHiddenElements: true});
+        const localFab = getByTestId('local-fab', {
+          includeHiddenElements: true,
+        });
         expect(localFab).toBeTruthy();
       });
       const addLocalModelButton = getByTestId('local-fab', {
