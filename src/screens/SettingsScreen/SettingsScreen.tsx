@@ -70,6 +70,52 @@ import {
 const OPENCL_DOCS_URL =
   'https://github.com/ggml-org/llama.cpp/blob/master/docs/backend/OPENCL.md#model-preparation';
 
+/**
+ * Converts an Android content:// URI from the Storage Access Framework
+ * to a real filesystem path.
+ *
+ * Android's pickDirectory() returns tree URIs like:
+ *   content://com.android.externalstorage.documents/tree/primary%3ADownload
+ *
+ * We decode the document ID and map:
+ *   "primary:Path"      → /storage/emulated/0/Path
+ *   "XXXX-XXXX:Path"    → /storage/XXXX-XXXX/Path  (SD card)
+ *
+ * Returns null if the URI cannot be parsed.
+ */
+const resolveContentUri = (uri: string): string | null => {
+  try {
+    // Decode percent-encoded characters
+    const decoded = decodeURIComponent(uri);
+
+    // Match tree URIs from ExternalStorageProvider
+    // e.g. content://com.android.externalstorage.documents/tree/primary:Download
+    const treeMatch = decoded.match(
+      /com\.android\.externalstorage\.documents\/tree\/([^/]+)/,
+    );
+    if (treeMatch) {
+      const docId = treeMatch[1]; // e.g. "primary:Download" or "XXXX-XXXX:Download"
+      const colonIdx = docId.indexOf(':');
+      if (colonIdx !== -1) {
+        const volume = docId.substring(0, colonIdx);
+        const relativePath = docId.substring(colonIdx + 1);
+        const base =
+          volume === 'primary' ? '/storage/emulated/0' : `/storage/${volume}`;
+        return relativePath ? `${base}/${relativePath}` : base;
+      }
+    }
+
+    // Fallback: if it's already a real path (not a content:// URI)
+    if (!uri.startsWith('content://')) {
+      return uri;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+};
+
 export const SettingsScreen: React.FC = observer(() => {
   const l10n = useContext(L10nContext);
   const theme = useTheme();
@@ -1173,17 +1219,20 @@ export const SettingsScreen: React.FC = observer(() => {
                         try {
                           const result = await pickDirectory();
                           if (result?.uri) {
-                            // Resolve the content:// URI to a real filesystem path.
-                            // RNFS.stat() on Android returns originalFilepath for
-                            // content:// URIs, which is the real FS path.
-                            const RNFS_mod = await import(
-                              '@dr.pogodin/react-native-fs'
-                            );
-                            const statResult = await RNFS_mod.stat(result.uri);
-                            const realPath =
-                              (statResult as any).originalFilepath ||
-                              statResult.path;
-                            uiStore.setCustomModelsDir(realPath);
+                            // Convert the content:// URI from Android's Storage
+                            // Access Framework to a real filesystem path.
+                            // pickDirectory() returns a tree URI like:
+                            //   content://com.android.externalstorage.documents/tree/primary%3ADownload
+                            // We decode and parse it to get the real FS path.
+                            const realPath = resolveContentUri(result.uri);
+                            if (realPath) {
+                              uiStore.setCustomModelsDir(realPath);
+                            } else {
+                              Alert.alert(
+                                l10n.settings.storageSettings,
+                                l10n.settings.directoryPickerError,
+                              );
+                            }
                           }
                         } catch (e: any) {
                           // User cancelled or error occurred
