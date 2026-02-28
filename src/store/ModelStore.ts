@@ -1,5 +1,6 @@
 import {AppState, AppStateStatus, Platform, Alert} from 'react-native';
 import DeviceInfo from 'react-native-device-info';
+import NativeDownloadModule from '../specs/NativeDownloadModule';
 
 import {v4 as uuidv4} from 'uuid';
 import 'react-native-get-random-values';
@@ -728,6 +729,10 @@ class ModelStore {
     // The base directory for new downloads (may be user-configured on Android)
     const modelsBaseDir = uiStore.modelsBaseDir;
 
+    // Check if the base directory is a SAF content:// URI (Android 10+ external storage)
+    const isSafBaseDir =
+      Platform.OS === 'android' && modelsBaseDir.startsWith('content://');
+
     // For preset models, check both old and new paths
     if (model.origin === ModelOrigin.PRESET) {
       const author = model.author || 'unknown';
@@ -740,10 +745,6 @@ class ModelStore {
       // Old path (deprecated, for backwards compatibility)
       // Always checked against DocumentDirectoryPath since that's where old files live
       const oldPath = `${RNFS.DocumentDirectoryPath}/models/preset/${author}/${model.filename}`;
-
-      // New path structure includes repository name
-      // Uses modelsBaseDir so new downloads go to the configured directory
-      const newPath = `${modelsBaseDir}/models/preset/${author}/${repo}/${model.filename}`;
 
       // Check if file exists at very old path first (for backwards compatibility)
       try {
@@ -762,6 +763,23 @@ class ModelStore {
       } catch (err) {
         console.log('Error checking old preset path:', err);
       }
+
+      if (isSafBaseDir) {
+        // For SAF URIs, use createSafFile to create the file in the SAF tree
+        const relativePath = `models/preset/${author}/${repo}/${model.filename}`;
+        console.log(
+          'getModelFullPath: creating SAF file for preset model:',
+          relativePath,
+        );
+        return await NativeDownloadModule.createSafFile(
+          modelsBaseDir,
+          relativePath,
+        );
+      }
+
+      // New path structure includes repository name
+      // Uses modelsBaseDir so new downloads go to the configured directory
+      const newPath = `${modelsBaseDir}/models/preset/${author}/${repo}/${model.filename}`;
 
       // If a custom dir is configured, also check if file already exists there
       // (handles re-downloads after changing the download directory)
@@ -793,10 +811,6 @@ class ModelStore {
       // Always checked against DocumentDirectoryPath since that's where old files live
       const oldPath = `${RNFS.DocumentDirectoryPath}/models/hf/${author}/${model.filename}`;
 
-      // New path structure includes repository name
-      // Uses modelsBaseDir so new downloads go to the configured directory
-      const newPath = `${modelsBaseDir}/models/hf/${author}/${repo}/${model.filename}`;
-
       // Check if file exists at old path (backwards compatibility)
       // This handles: existing downloads, models after reset, models after app update
       try {
@@ -806,6 +820,23 @@ class ModelStore {
       } catch (err) {
         console.log('Error checking old HF model path:', err);
       }
+
+      if (isSafBaseDir) {
+        // For SAF URIs, use createSafFile to create the file in the SAF tree
+        const relativePath = `models/hf/${author}/${repo}/${model.filename}`;
+        console.log(
+          'getModelFullPath: creating SAF file for HF model:',
+          relativePath,
+        );
+        return await NativeDownloadModule.createSafFile(
+          modelsBaseDir,
+          relativePath,
+        );
+      }
+
+      // New path structure includes repository name
+      // Uses modelsBaseDir so new downloads go to the configured directory
+      const newPath = `${modelsBaseDir}/models/hf/${author}/${repo}/${model.filename}`;
 
       // If a custom dir is configured, also check if file already exists there
       // (handles re-downloads after changing the download directory)
@@ -825,6 +856,12 @@ class ModelStore {
 
     // Fallback (shouldn't reach here)
     console.error('should not reach here. model: ', model);
+    if (isSafBaseDir) {
+      return await NativeDownloadModule.createSafFile(
+        modelsBaseDir,
+        model.filename,
+      );
+    }
     return `${modelsBaseDir}/${model.filename}`;
   };
 

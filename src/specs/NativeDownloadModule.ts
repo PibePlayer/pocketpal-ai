@@ -39,6 +39,17 @@ export interface Spec extends TurboModule {
 
   // Debug operations
   logDownloadDatabase(): Promise<boolean>;
+
+  // Storage Access Framework (SAF) operations for Android 10+
+  // Takes persistent read/write URI permissions for a directory tree URI
+  // obtained via ACTION_OPEN_DOCUMENT_TREE (pickDirectory).
+  takePersistableUriPermission(uri: string): Promise<boolean>;
+
+  // Creates a file (and any needed subdirectories) within a SAF tree URI.
+  // treeUri: the content:// tree URI granted by ACTION_OPEN_DOCUMENT_TREE
+  // relativePath: path relative to the tree root, e.g. "models/hf/author/repo/model.gguf"
+  // Returns the content:// URI of the created (or existing) file.
+  createSafFile(treeUri: string, relativePath: string): Promise<string>;
 }
 
 // Only load the module on Android

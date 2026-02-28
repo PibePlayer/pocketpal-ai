@@ -1,6 +1,7 @@
 package com.pocketpal.download
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import androidx.work.*
 import kotlinx.coroutines.Dispatchers
@@ -9,6 +10,7 @@ import okhttp3.*
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.io.OutputStream
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
@@ -57,11 +59,22 @@ class DownloadWorker(
                 return@withContext Result.retry()
             }
 
-            val file = File(download.destination)
-            Log.d(TAG, "Download destination: ${file.absolutePath}")
-            
-            // Check if file size and database are in sync
-            if (file.exists() && file.length() > 0) {
+            // Determine if destination is a SAF content:// URI or a regular file path
+            val isSafUri = download.destination.startsWith("content://")
+            Log.d(TAG, "Download destination: ${download.destination}, isSafUri=$isSafUri")
+
+            // For regular file paths, use File API; for SAF URIs, use ContentResolver
+            val file: File? = if (isSafUri) null else File(download.destination)
+            val safUri: Uri? = if (isSafUri) Uri.parse(download.destination) else null
+
+            if (file != null) {
+                Log.d(TAG, "Download destination (file): ${file.absolutePath}")
+            } else {
+                Log.d(TAG, "Download destination (SAF URI): $safUri")
+            }
+
+            // Check if file size and database are in sync (only for regular files)
+            if (file != null && file.exists() && file.length() > 0) {
                 // If file exists but size doesn't match database, update database
                 if (file.length() != download.downloadedBytes) {
                     Log.d(TAG, "File size (${file.length()}) doesn't match database (${download.downloadedBytes}). Updating database.")
@@ -73,13 +86,38 @@ class DownloadWorker(
                     }
                 }
             }
+            // For SAF URIs, check existing size via ContentResolver
+            if (safUri != null) {
+                try {
+                    val cursor = applicationContext.contentResolver.query(
+                        safUri, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null
+                    )
+                    cursor?.use {
+                        if (it.moveToFirst()) {
+                            val sizeIdx = it.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                            if (sizeIdx >= 0) {
+                                val existingSize = it.getLong(sizeIdx)
+                                if (existingSize > 0 && existingSize != download.downloadedBytes) {
+                                    Log.d(TAG, "SAF file size ($existingSize) doesn't match database (${download.downloadedBytes}). Updating database.")
+                                    downloadDao.updateProgress(downloadId, existingSize, download.totalBytes, download.status)
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not query SAF file size", e)
+                }
+            }
             
+            // Determine existing bytes for range request (resume support)
+            val existingBytes = if (file != null && file.exists()) file.length() else download.downloadedBytes
+
             val request = Request.Builder()
                 .url(download.url)
                 .apply {
-                    if (file.exists() && file.length() > 0) {
-                        val range = "bytes=${file.length()}-"
-                        Log.d(TAG, "Resuming download from byte ${file.length()}")
+                    if (existingBytes > 0) {
+                        val range = "bytes=$existingBytes-"
+                        Log.d(TAG, "Resuming download from byte $existingBytes")
                         addHeader("Range", range)
                     }
                     
@@ -116,18 +154,19 @@ class DownloadWorker(
             }
             currentCall = null  // Clear the reference after completion
 
-            if (file.exists() && file.length() > 0 && response.code == 200) {
+            if (existingBytes > 0 && response.code == 200) {
                 Log.w(TAG, "Server ignored range request, returning full file. Restarting download from beginning.")
-                if (file.exists()) {
+                if (file != null && file.exists()) {
                     Log.d(TAG, "Deleting partial file to restart download: ${file.absolutePath}")
                     file.delete()
                 }
+                // For SAF URIs, we can't easily truncate; just reset the byte counter
             } else if (!response.isSuccessful) {
                 when (response.code) {
                     416 -> {
                         Log.e(TAG, "Server rejected the range request for ID: $downloadId")
                         
-                        if (file.exists()) {
+                        if (file != null && file.exists()) {
                             Log.d(TAG, "Deleting invalid partial file: ${file.absolutePath}")
                             file.delete()
                         }
@@ -167,7 +206,7 @@ class DownloadWorker(
                 Log.d(TAG, "Content length from response: $contentLength bytes for ID: $downloadId")
                 
                 // Get existing bytes written
-                var bytesWritten = if (file.exists()) file.length() else 0
+                var bytesWritten = if (file != null && file.exists()) file.length() else download.downloadedBytes
                 Log.d(TAG, "Existing bytes written: $bytesWritten for ID: $downloadId")
                 
                 // Calculate total expected size based on response code
@@ -196,11 +235,23 @@ class DownloadWorker(
                 downloadDao.updateProgress(downloadId, bytesWritten, totalBytes, DownloadStatus.RUNNING)
                 Log.d(TAG, "Updated database: $bytesWritten/$totalBytes bytes (${(bytesWritten.toFloat() / totalBytes * 100).toInt()}%) for ID: $downloadId")
 
-                // Determine if we should append to the file
-                val appendMode = file.exists() && response.code == 206
+                // Open output stream: use ContentResolver for SAF URIs, FileOutputStream for regular paths
+                val appendMode = response.code == 206
                 Log.d(TAG, "Opening file in ${if (appendMode) "append" else "overwrite"} mode")
-                
-                FileOutputStream(file, appendMode).buffered().use { output ->
+
+                val outputStream: OutputStream = if (safUri != null) {
+                    // SAF URI: use ContentResolver to open output stream
+                    // Note: SAF doesn't support append mode directly; for resume we rely on
+                    // the Range header and the server returning 206 Partial Content.
+                    // We open in "wa" (write-append) mode when resuming.
+                    val mode = if (appendMode) "wa" else "w"
+                    applicationContext.contentResolver.openOutputStream(safUri, mode)
+                        ?: throw IOException("Cannot open output stream for SAF URI: $safUri")
+                } else {
+                    FileOutputStream(file!!, appendMode)
+                }
+
+                outputStream.buffered().use { output ->
                     body.byteStream().buffered().use { input ->
                         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                         var bytes = input.read(buffer)
@@ -209,7 +260,7 @@ class DownloadWorker(
                             if (isStopped) {
                                 Log.d(TAG, "Download cancelled during transfer for ID: $downloadId")
                                 downloadDao.updateStatus(downloadId, DownloadStatus.CANCELLED, "Download cancelled")
-                                if (file.exists()) {
+                                if (file != null && file.exists()) {
                                     file.delete()
                                     Log.d(TAG, "Deleted partial download file: ${file.absolutePath}")
                                 }

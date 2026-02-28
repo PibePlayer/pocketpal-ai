@@ -16,6 +16,7 @@ import {observer} from 'mobx-react-lite';
 import {toJS} from 'mobx';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {pickDirectory} from '@react-native-documents/picker';
+import NativeDownloadModule from '../../specs/NativeDownloadModule';
 import {
   Switch,
   Text,
@@ -71,30 +72,23 @@ const OPENCL_DOCS_URL =
   'https://github.com/ggml-org/llama.cpp/blob/master/docs/backend/OPENCL.md#model-preparation';
 
 /**
- * Converts an Android content:// URI from the Storage Access Framework
- * to a real filesystem path.
+ * Converts an Android SAF content:// tree URI to a human-readable path for display.
  *
- * Android's pickDirectory() returns tree URIs like:
- *   content://com.android.externalstorage.documents/tree/primary%3ADownload
+ * content://com.android.externalstorage.documents/tree/primary%3ADownload
+ *   → /storage/emulated/0/Download
+ * content://com.android.externalstorage.documents/tree/XXXX-XXXX%3APath
+ *   → /storage/XXXX-XXXX/Path  (SD card)
  *
- * We decode the document ID and map:
- *   "primary:Path"      → /storage/emulated/0/Path
- *   "XXXX-XXXX:Path"    → /storage/XXXX-XXXX/Path  (SD card)
- *
- * Returns null if the URI cannot be parsed.
+ * Returns the original URI if it cannot be parsed (e.g. for non-SAF URIs).
  */
-const resolveContentUri = (uri: string): string | null => {
+const getDisplayPath = (uri: string): string => {
   try {
-    // Decode percent-encoded characters
     const decoded = decodeURIComponent(uri);
-
-    // Match tree URIs from ExternalStorageProvider
-    // e.g. content://com.android.externalstorage.documents/tree/primary:Download
     const treeMatch = decoded.match(
       /com\.android\.externalstorage\.documents\/tree\/([^/]+)/,
     );
     if (treeMatch) {
-      const docId = treeMatch[1]; // e.g. "primary:Download" or "XXXX-XXXX:Download"
+      const docId = treeMatch[1];
       const colonIdx = docId.indexOf(':');
       if (colonIdx !== -1) {
         const volume = docId.substring(0, colonIdx);
@@ -104,38 +98,9 @@ const resolveContentUri = (uri: string): string | null => {
         return relativePath ? `${base}/${relativePath}` : base;
       }
     }
-
-    // Fallback: if it's already a real path (not a content:// URI)
-    if (!uri.startsWith('content://')) {
-      return uri;
-    }
-
-    return null;
+    return uri;
   } catch {
-    return null;
-  }
-};
-
-/**
- * Tests whether the app can write to the given directory path.
- * On Android 10+, writing to shared external storage (e.g. /storage/emulated/0/Download)
- * requires WRITE_EXTERNAL_STORAGE permission which is not granted.
- * Only app-specific directories are writable without special permissions.
- *
- * Returns true if the directory is writable, false otherwise.
- */
-const testDirectoryWritable = async (dirPath: string): Promise<boolean> => {
-  try {
-    const RNFS_mod = await import('@dr.pogodin/react-native-fs');
-    const testFile = `${dirPath}/.pocketpal_write_test`;
-    // Try to write a small test file
-    await RNFS_mod.writeFile(testFile, 'test', 'utf8');
-    // Clean up
-    await RNFS_mod.unlink(testFile);
-    return true;
-  } catch (err) {
-    console.log('Directory write test failed:', err);
-    return false;
+    return uri;
   }
 };
 
@@ -1231,8 +1196,9 @@ export const SettingsScreen: React.FC = observer(() => {
                     variant="bodySmall"
                     style={[styles.textDescription, {marginTop: 4}]}
                     numberOfLines={2}>
-                    {uiStore.customModelsDir ||
-                      l10n.settings.downloadDirectoryDefault}
+                    {uiStore.customModelsDir
+                      ? getDisplayPath(uiStore.customModelsDir)
+                      : l10n.settings.downloadDirectoryDefault}
                   </Text>
                   <View style={[styles.switchContainer, {marginTop: 8}]}>
                     <Button
@@ -1242,46 +1208,30 @@ export const SettingsScreen: React.FC = observer(() => {
                         try {
                           const result = await pickDirectory();
                           if (result?.uri) {
-                            // Convert the content:// URI from Android's Storage
-                            // Access Framework to a real filesystem path.
-                            // pickDirectory() returns a tree URI like:
-                            //   content://com.android.externalstorage.documents/tree/primary%3ADownload
-                            // We decode and parse it to get the real FS path.
-                            const realPath = resolveContentUri(result.uri);
+                            // Store the content:// URI directly.
+                            // On Android 10+, we use the Storage Access Framework (SAF)
+                            // which grants access via content:// URIs.
+                            // We take persistent URI permissions so access survives restarts.
                             console.log(
-                              '[SettingsScreen] Resolved directory URI:',
+                              '[SettingsScreen] Selected directory URI:',
                               result.uri,
-                              '→',
-                              realPath,
                             );
-                            if (realPath) {
-                              // Validate that the app can actually write to this path.
-                              // On Android 10+, shared external storage paths like
-                              // /storage/emulated/0/Download require WRITE_EXTERNAL_STORAGE
-                              // which is not granted. Only app-specific directories work.
-                              const writable =
-                                await testDirectoryWritable(realPath);
+                            try {
+                              await NativeDownloadModule.takePersistableUriPermission(
+                                result.uri,
+                              );
                               console.log(
-                                '[SettingsScreen] Directory writable:',
-                                writable,
-                                'path:',
-                                realPath,
+                                '[SettingsScreen] Took persistable URI permission for:',
+                                result.uri,
                               );
-                              if (writable) {
-                                uiStore.setCustomModelsDir(realPath);
-                              } else {
-                                Alert.alert(
-                                  l10n.settings.storageSettings,
-                                  l10n.settings.directoryPermissionError ||
-                                    'The app does not have permission to write to this directory. Please select a directory within the app storage or SD card app folder.',
-                                );
-                              }
-                            } else {
-                              Alert.alert(
-                                l10n.settings.storageSettings,
-                                l10n.settings.directoryPickerError,
+                            } catch (permErr) {
+                              console.warn(
+                                '[SettingsScreen] Failed to take persistable URI permission:',
+                                permErr,
                               );
+                              // Continue anyway - the permission may still work for this session
                             }
+                            uiStore.setCustomModelsDir(result.uri);
                           }
                         } catch (e: any) {
                           // User cancelled or error occurred

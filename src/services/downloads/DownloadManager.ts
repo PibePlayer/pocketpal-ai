@@ -233,16 +233,29 @@ export class DownloadManager {
       throw new Error('Not enough storage space to download the model');
     }
 
-    const dirPath = destinationPath.substring(
-      0,
-      destinationPath.lastIndexOf('/'),
-    );
-    try {
-      console.log(`${TAG}: Creating directory:`, dirPath);
-      await RNFS.mkdir(dirPath);
-    } catch (err) {
-      console.error(`${TAG}: Failed to create directory:`, err);
-      throw err;
+    // Check if destinationPath is a SAF content:// URI (Android 10+ external storage)
+    const isSafUri = destinationPath.startsWith('content://');
+
+    if (isSafUri) {
+      // For SAF URIs, the file was already created by createSafFile() in ModelStore.
+      // No need to create directories - just proceed with the download.
+      console.log(
+        `${TAG}: SAF URI destination, skipping mkdir:`,
+        destinationPath,
+      );
+    } else {
+      // For regular file paths, create the directory
+      const dirPath = destinationPath.substring(
+        0,
+        destinationPath.lastIndexOf('/'),
+      );
+      try {
+        console.log(`${TAG}: Creating directory:`, dirPath);
+        await RNFS.mkdir(dirPath);
+      } catch (err) {
+        console.error(`${TAG}: Failed to create directory:`, err);
+        throw err;
+      }
     }
 
     if (Platform.OS === 'ios') {

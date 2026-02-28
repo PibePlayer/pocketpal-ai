@@ -1,6 +1,9 @@
 package com.pocketpal.download
 
+import android.content.Intent
+import android.net.Uri
 import android.util.Log
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.Observer
 import androidx.work.*
 import com.facebook.react.bridge.*
@@ -10,6 +13,7 @@ import com.pocketpal.specs.NativeDownloadModuleSpec
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import java.io.File
+import java.io.IOException
 import java.util.*
 import androidx.concurrent.futures.await
 
@@ -512,8 +516,85 @@ class DownloadModule(reactContext: ReactApplicationContext) : NativeDownloadModu
         return observer
     }
 
+    /**
+     * Takes persistent read/write URI permissions for a directory tree URI
+     * obtained via ACTION_OPEN_DOCUMENT_TREE (pickDirectory).
+     * This allows the app to access the directory across app restarts.
+     */
+    override fun takePersistableUriPermission(uri: String, promise: Promise) {
+        Log.d(TAG, "Taking persistable URI permission for: $uri")
+        try {
+            val parsedUri = Uri.parse(uri)
+            val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            reactApplicationContext.contentResolver.takePersistableUriPermission(parsedUri, flags)
+            Log.d(TAG, "Successfully took persistable URI permission for: $uri")
+            promise.resolve(true)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to take persistable URI permission for: $uri", e)
+            promise.reject("SAF_PERMISSION_ERROR", e.message)
+        }
+    }
+
+    /**
+     * Creates a file (and any needed subdirectories) within a SAF tree URI.
+     * Returns the content:// URI of the created (or existing) file.
+     *
+     * @param treeUri The content:// tree URI granted by ACTION_OPEN_DOCUMENT_TREE
+     * @param relativePath Path relative to the tree root, e.g. "models/hf/author/repo/model.gguf"
+     */
+    override fun createSafFile(treeUri: String, relativePath: String, promise: Promise) {
+        Log.d(TAG, "Creating SAF file: treeUri=$treeUri, relativePath=$relativePath")
+        scope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    val parsedUri = Uri.parse(treeUri)
+                    var dir = DocumentFile.fromTreeUri(reactApplicationContext, parsedUri)
+                        ?: throw IllegalArgumentException("Cannot open tree URI: $treeUri")
+
+                    // Split the relative path into directory parts and filename
+                    val parts = relativePath.split("/").filter { it.isNotEmpty() }
+                    if (parts.isEmpty()) {
+                        throw IllegalArgumentException("relativePath is empty")
+                    }
+
+                    // Navigate/create subdirectories
+                    val dirParts = parts.dropLast(1)
+                    val fileName = parts.last()
+
+                    for (part in dirParts) {
+                        val existing = dir.findFile(part)
+                        dir = if (existing != null && existing.isDirectory) {
+                            existing
+                        } else {
+                            dir.createDirectory(part)
+                                ?: throw IOException("Cannot create directory: $part")
+                        }
+                    }
+
+                    // Create or find the file
+                    val existingFile = dir.findFile(fileName)
+                    val file = if (existingFile != null && existingFile.isFile) {
+                        Log.d(TAG, "File already exists: ${existingFile.uri}")
+                        existingFile
+                    } else {
+                        // Use application/octet-stream for GGUF files
+                        dir.createFile("application/octet-stream", fileName)
+                            ?: throw IOException("Cannot create file: $fileName")
+                    }
+
+                    file.uri.toString()
+                }
+                Log.d(TAG, "Created SAF file URI: $result")
+                promise.resolve(result)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to create SAF file", e)
+                promise.reject("SAF_CREATE_FILE_ERROR", e.message)
+            }
+        }
+    }
+
     companion object {
         private const val TAG = "DownloadModule"
         private fun getWorkName(downloadId: String) = "download_$downloadId"
     }
-} 
+}
