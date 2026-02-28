@@ -2,6 +2,8 @@ package com.pocketpal.download
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Environment
+import android.provider.DocumentsContract
 import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.Observer
@@ -597,9 +599,10 @@ class DownloadModule(reactContext: ReactApplicationContext) : NativeDownloadModu
      * Resolves a SAF content:// URI to a real filesystem path.
      *
      * Uses multiple strategies:
-     * 1. Query MediaStore for the DATA column (works for files in MediaStore)
-     * 2. Use DocumentFile to get the absolute path
+     * 1. Direct URI path parsing for ExternalStorageProvider URIs
+     * 2. Query MediaStore for the DATA column
      * 3. Use /proc/self/fd/<fd> trick via ParcelFileDescriptor
+     * 4. Use DocumentFile to get the absolute path
      *
      * Returns the real path, or null if it cannot be resolved.
      */
@@ -610,7 +613,34 @@ class DownloadModule(reactContext: ReactApplicationContext) : NativeDownloadModu
                 val result = withContext(Dispatchers.IO) {
                     val uri = Uri.parse(contentUri)
                     
-                    // Strategy 1: Query MediaStore DATA column
+                    // Strategy 1: Parse ExternalStorageProvider URI directly
+                    // content://com.android.externalstorage.documents/document/primary%3ADownload%2Fmodels%2F...
+                    try {
+                        if (uri.authority == "com.android.externalstorage.documents") {
+                            val docId = DocumentsContract.getDocumentId(uri)
+                            // docId format: "primary:Download/models/hf/..." or "XXXX-XXXX:Path"
+                            val colonIdx = docId.indexOf(':')
+                            if (colonIdx != -1) {
+                                val volume = docId.substring(0, colonIdx)
+                                val relativePath = docId.substring(colonIdx + 1)
+                                val basePath = if (volume == "primary") {
+                                    "/storage/emulated/0"
+                                } else {
+                                    "/storage/$volume"
+                                }
+                                val fullPath = "$basePath/$relativePath"
+                                // Verify the file exists
+                                if (File(fullPath).exists()) {
+                                    Log.d(TAG, "Resolved via ExternalStorageProvider: $fullPath")
+                                    return@withContext fullPath
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "ExternalStorageProvider parsing failed: ${e.message}")
+                    }
+                    
+                    // Strategy 2: Query MediaStore DATA column
                     try {
                         val projection = arrayOf(android.provider.MediaStore.MediaColumns.DATA)
                         val cursor = reactApplicationContext.contentResolver.query(
@@ -621,7 +651,7 @@ class DownloadModule(reactContext: ReactApplicationContext) : NativeDownloadModu
                                 val dataIdx = it.getColumnIndex(android.provider.MediaStore.MediaColumns.DATA)
                                 if (dataIdx >= 0) {
                                     val path = it.getString(dataIdx)
-                                    if (!path.isNullOrEmpty()) {
+                                    if (!path.isNullOrEmpty() && File(path).exists()) {
                                         Log.d(TAG, "Resolved via MediaStore: $path")
                                         return@withContext path
                                     }
@@ -632,14 +662,14 @@ class DownloadModule(reactContext: ReactApplicationContext) : NativeDownloadModu
                         Log.w(TAG, "MediaStore query failed: ${e.message}")
                     }
                     
-                    // Strategy 2: Use /proc/self/fd trick
+                    // Strategy 3: Use /proc/self/fd trick
                     try {
                         val pfd = reactApplicationContext.contentResolver.openFileDescriptor(uri, "r")
                         pfd?.use {
                             val fdPath = "/proc/self/fd/${it.fd}"
                             // Resolve the symlink to get the real path
-                            val realPath = java.io.File(fdPath).canonicalPath
-                            if (realPath != fdPath && !realPath.startsWith("/proc")) {
+                            val realPath = File(fdPath).canonicalPath
+                            if (realPath != fdPath && !realPath.startsWith("/proc") && File(realPath).exists()) {
                                 Log.d(TAG, "Resolved via /proc/self/fd: $realPath")
                                 return@withContext realPath
                             }
@@ -648,13 +678,27 @@ class DownloadModule(reactContext: ReactApplicationContext) : NativeDownloadModu
                         Log.w(TAG, "/proc/self/fd resolution failed: ${e.message}")
                     }
                     
-                    // Strategy 3: DocumentFile absolute path (deprecated but may work)
+                    // Strategy 4: DocumentFile - try to find the file in known locations
                     try {
                         val docFile = DocumentFile.fromSingleUri(reactApplicationContext, uri)
-                        val absPath = docFile?.uri?.path
-                        if (!absPath.isNullOrEmpty() && !absPath.startsWith("/document/")) {
-                            Log.d(TAG, "Resolved via DocumentFile: $absPath")
-                            return@withContext absPath
+                        if (docFile != null && docFile.exists()) {
+                            // Try to construct path from display name
+                            val displayName = docFile.name
+                            if (!displayName.isNullOrEmpty()) {
+                                // Try common external storage paths
+                                val possiblePaths = listOf(
+                                    "/storage/emulated/0/Download/$displayName",
+                                    "/storage/emulated/0/Documents/$displayName",
+                                    "/sdcard/Download/$displayName",
+                                    "/sdcard/Documents/$displayName"
+                                )
+                                for (path in possiblePaths) {
+                                    if (File(path).exists()) {
+                                        Log.d(TAG, "Resolved via DocumentFile heuristic: $path")
+                                        return@withContext path
+                                    }
+                                }
+                            }
                         }
                     } catch (e: Exception) {
                         Log.w(TAG, "DocumentFile resolution failed: ${e.message}")
