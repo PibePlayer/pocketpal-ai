@@ -169,8 +169,10 @@ class ModelStore {
         }
       },
       onComplete: async modelId => {
+        console.log('[ModelStore] Download onComplete called for model:', modelId);
         const model = this.models.find(m => m.id === modelId);
         if (model) {
+          console.log('[ModelStore] Found model, updating state:', model.id);
           runInAction(() => {
             model.progress = 100;
             model.isDownloaded = true;
@@ -179,8 +181,16 @@ class ModelStore {
           // Fetch and persist GGUF metadata after download completes
           // Skip for projection models (CLIP) - they have different metadata structure
           if (model.modelType !== ModelType.PROJECTION) {
-            await this.fetchAndPersistGGUFMetadata(model);
+            console.log('[ModelStore] Fetching GGUF metadata for model:', model.id);
+            try {
+              await this.fetchAndPersistGGUFMetadata(model);
+              console.log('[ModelStore] GGUF metadata fetched successfully for model:', model.id);
+            } catch (err) {
+              console.error('[ModelStore] Error fetching GGUF metadata:', err);
+            }
           }
+        } else {
+          console.warn('[ModelStore] Model not found for onComplete:', modelId);
         }
       },
       onError: (modelId, error) => {
@@ -714,11 +724,13 @@ class ModelStore {
    * @throws Error if filename is undefined or if fullPath is undefined for local models
    */
   getModelFullPath = async (model: Model): Promise<string> => {
+    console.log('[ModelStore] getModelFullPath called for model:', model.id, 'origin:', model.origin);
     // For local models, use the fullPath
     if (model.isLocal || model.origin === ModelOrigin.LOCAL) {
       if (!model.fullPath) {
         throw new Error('Full path is undefined for local model');
       }
+      console.log('[ModelStore] Local model path:', model.fullPath);
       return model.fullPath;
     }
 
@@ -728,10 +740,12 @@ class ModelStore {
 
     // The base directory for new downloads (may be user-configured on Android)
     const modelsBaseDir = uiStore.modelsBaseDir;
+    console.log('[ModelStore] modelsBaseDir:', modelsBaseDir);
 
     // Check if the base directory is a SAF content:// URI (Android 10+ external storage)
     const isSafBaseDir =
       Platform.OS === 'android' && modelsBaseDir.startsWith('content://');
+    console.log('[ModelStore] isSafBaseDir:', isSafBaseDir);
 
     // For preset models, check both old and new paths
     if (model.origin === ModelOrigin.PRESET) {
@@ -770,21 +784,28 @@ class ModelStore {
         // to a real filesystem path that llama.rn and RNFS can use.
         const relativePath = `models/preset/${author}/${repo}/${model.filename}`;
         console.log(
-          'getModelFullPath: creating SAF file for preset model:',
+          '[ModelStore] getModelFullPath: creating SAF file for preset model:',
           relativePath,
         );
-        const contentUri = await NativeDownloadModule.createSafFile(
-          modelsBaseDir,
-          relativePath,
-        );
+        let contentUri: string;
+        try {
+          contentUri = await NativeDownloadModule.createSafFile(
+            modelsBaseDir,
+            relativePath,
+          );
+          console.log('[ModelStore] createSafFile returned:', contentUri);
+        } catch (err) {
+          console.error('[ModelStore] createSafFile failed:', err);
+          throw err;
+        }
         try {
           const realPath =
             await NativeDownloadModule.getSafFileRealPath(contentUri);
-          console.log('getModelFullPath: resolved SAF preset path:', realPath);
+          console.log('[ModelStore] getModelFullPath: resolved SAF preset path:', realPath);
           return realPath;
         } catch (err) {
           console.warn(
-            'getModelFullPath: could not resolve SAF real path, using content URI:',
+            '[ModelStore] getModelFullPath: could not resolve SAF real path, using content URI:',
             err,
           );
           return contentUri;
@@ -794,20 +815,25 @@ class ModelStore {
       // New path structure includes repository name
       // Uses modelsBaseDir so new downloads go to the configured directory
       const newPath = `${modelsBaseDir}/models/preset/${author}/${repo}/${model.filename}`;
+      console.log('[ModelStore] Preset newPath:', newPath);
 
       // If a custom dir is configured, also check if file already exists there
       // (handles re-downloads after changing the download directory)
       if (modelsBaseDir !== RNFS.DocumentDirectoryPath) {
+        console.log('[ModelStore] Checking custom dir for existing file:', newPath);
         try {
-          if (await RNFS.exists(newPath)) {
+          const exists = await RNFS.exists(newPath);
+          console.log('[ModelStore] Custom dir file exists:', exists);
+          if (exists) {
             return newPath;
           }
         } catch (err) {
-          console.log('Error checking custom dir preset path:', err);
+          console.log('[ModelStore] Error checking custom dir preset path:', err);
         }
       }
 
       // Otherwise use new path (destination for new downloads)
+      console.log('[ModelStore] Returning preset newPath:', newPath);
       return newPath;
     }
 
@@ -839,21 +865,28 @@ class ModelStore {
         // For SAF URIs, create the file in the SAF tree and resolve to real path.
         const relativePath = `models/hf/${author}/${repo}/${model.filename}`;
         console.log(
-          'getModelFullPath: creating SAF file for HF model:',
+          '[ModelStore] getModelFullPath: creating SAF file for HF model:',
           relativePath,
         );
-        const contentUri = await NativeDownloadModule.createSafFile(
-          modelsBaseDir,
-          relativePath,
-        );
+        let contentUri: string;
+        try {
+          contentUri = await NativeDownloadModule.createSafFile(
+            modelsBaseDir,
+            relativePath,
+          );
+          console.log('[ModelStore] createSafFile returned:', contentUri);
+        } catch (err) {
+          console.error('[ModelStore] createSafFile failed:', err);
+          throw err;
+        }
         try {
           const realPath =
             await NativeDownloadModule.getSafFileRealPath(contentUri);
-          console.log('getModelFullPath: resolved SAF HF path:', realPath);
+          console.log('[ModelStore] getModelFullPath: resolved SAF HF path:', realPath);
           return realPath;
         } catch (err) {
           console.warn(
-            'getModelFullPath: could not resolve SAF real path, using content URI:',
+            '[ModelStore] getModelFullPath: could not resolve SAF real path, using content URI:',
             err,
           );
           return contentUri;
@@ -863,42 +896,56 @@ class ModelStore {
       // New path structure includes repository name
       // Uses modelsBaseDir so new downloads go to the configured directory
       const newPath = `${modelsBaseDir}/models/hf/${author}/${repo}/${model.filename}`;
+      console.log('[ModelStore] HF newPath:', newPath);
 
       // If a custom dir is configured, also check if file already exists there
       // (handles re-downloads after changing the download directory)
       if (modelsBaseDir !== RNFS.DocumentDirectoryPath) {
+        console.log('[ModelStore] Checking custom dir for existing HF file:', newPath);
         try {
-          if (await RNFS.exists(newPath)) {
+          const exists = await RNFS.exists(newPath);
+          console.log('[ModelStore] Custom dir HF file exists:', exists);
+          if (exists) {
             return newPath;
           }
         } catch (err) {
-          console.log('Error checking custom dir HF path:', err);
+          console.log('[ModelStore] Error checking custom dir HF path:', err);
         }
       }
 
       // Otherwise use new path (destination for new downloads)
+      console.log('[ModelStore] Returning HF newPath:', newPath);
       return newPath;
     }
 
     // Fallback (shouldn't reach here)
-    console.error('should not reach here. model: ', model);
+    console.error('[ModelStore] should not reach here. model: ', model);
     if (isSafBaseDir) {
+      console.log('[ModelStore] Fallback: creating SAF file for:', model.filename);
       const contentUri = await NativeDownloadModule.createSafFile(
         modelsBaseDir,
         model.filename,
       );
       try {
-        return await NativeDownloadModule.getSafFileRealPath(contentUri);
+        const realPath = await NativeDownloadModule.getSafFileRealPath(contentUri);
+        console.log('[ModelStore] Fallback: resolved SAF path:', realPath);
+        return realPath;
       } catch {
+        console.log('[ModelStore] Fallback: using content URI:', contentUri);
         return contentUri;
       }
     }
-    return `${modelsBaseDir}/${model.filename}`;
+    const fallbackPath = `${modelsBaseDir}/${model.filename}`;
+    console.log('[ModelStore] Fallback: returning path:', fallbackPath);
+    return fallbackPath;
   };
 
   async checkFileExists(model: Model) {
+    console.log('[ModelStore] checkFileExists called for model:', model.id);
     const filePath = await this.getModelFullPath(model);
+    console.log('[ModelStore] checkFileExists path:', filePath);
     let exists = await RNFS.exists(filePath);
+    console.log('[ModelStore] checkFileExists result:', exists);
 
     // For SAF-downloaded models, also check that the file has non-zero size.
     // createSafFile creates an empty placeholder file, so we need to verify
@@ -1231,7 +1278,9 @@ class ModelStore {
    */
   fetchAndPersistGGUFMetadata = async (model: Model) => {
     try {
+      console.log('[ModelStore] fetchAndPersistGGUFMetadata called for model:', model.id);
       const filePath = await this.getModelFullPath(model);
+      console.log('[ModelStore] getModelFullPath returned:', filePath);
       if (!filePath) {
         console.warn(
           '[ModelStore] Cannot fetch GGUF metadata: model path is undefined',
@@ -1239,7 +1288,17 @@ class ModelStore {
         return;
       }
 
+      // Check if file exists before trying to load
+      const exists = await RNFS.exists(filePath);
+      console.log('[ModelStore] File exists check:', {filePath, exists});
+      if (!exists) {
+        console.warn('[ModelStore] File does not exist at path:', filePath);
+        return;
+      }
+
+      console.log('[ModelStore] Calling loadLlamaModelInfo with path:', filePath);
       const modelInfo = await loadLlamaModelInfo(filePath);
+      console.log('[ModelStore] loadLlamaModelInfo returned:', modelInfo ? 'valid' : 'null/undefined');
       if (!modelInfo || typeof modelInfo !== 'object') {
         console.warn('[ModelStore] Invalid model info returned');
         return;

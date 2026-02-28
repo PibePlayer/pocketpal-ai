@@ -110,6 +110,11 @@ export class DownloadManager {
         );
 
         if (job) {
+          console.log(`${TAG}: Found completed job:`, {
+            modelId: job.model.id,
+            destination: job.destination,
+            isSafUri: job.destination?.startsWith('content://'),
+          });
           // Set final state before removing
           job.state.isDownloading = false;
           job.state.progress = {
@@ -122,7 +127,13 @@ export class DownloadManager {
             rawEta: 0,
           };
           // Ensure callback is called before removing the job
-          this.callbacks.onComplete?.(job.model.id);
+          try {
+            console.log(`${TAG}: Calling onComplete callback for model:`, job.model.id);
+            this.callbacks.onComplete?.(job.model.id);
+            console.log(`${TAG}: onComplete callback finished for model:`, job.model.id);
+          } catch (err) {
+            console.error(`${TAG}: Error in onComplete callback:`, err);
+          }
           this.downloadJobs.delete(job.model.id);
           console.log(`${TAG}: Removed completed job: ${job.model.id}`);
         } else {
