@@ -593,6 +593,89 @@ class DownloadModule(reactContext: ReactApplicationContext) : NativeDownloadModu
         }
     }
 
+    /**
+     * Resolves a SAF content:// URI to a real filesystem path.
+     *
+     * Uses multiple strategies:
+     * 1. Query MediaStore for the DATA column (works for files in MediaStore)
+     * 2. Use DocumentFile to get the absolute path
+     * 3. Use /proc/self/fd/<fd> trick via ParcelFileDescriptor
+     *
+     * Returns the real path, or null if it cannot be resolved.
+     */
+    override fun getSafFileRealPath(contentUri: String, promise: Promise) {
+        Log.d(TAG, "Getting real path for SAF URI: $contentUri")
+        scope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    val uri = Uri.parse(contentUri)
+                    
+                    // Strategy 1: Query MediaStore DATA column
+                    try {
+                        val projection = arrayOf(android.provider.MediaStore.MediaColumns.DATA)
+                        val cursor = reactApplicationContext.contentResolver.query(
+                            uri, projection, null, null, null
+                        )
+                        cursor?.use {
+                            if (it.moveToFirst()) {
+                                val dataIdx = it.getColumnIndex(android.provider.MediaStore.MediaColumns.DATA)
+                                if (dataIdx >= 0) {
+                                    val path = it.getString(dataIdx)
+                                    if (!path.isNullOrEmpty()) {
+                                        Log.d(TAG, "Resolved via MediaStore: $path")
+                                        return@withContext path
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "MediaStore query failed: ${e.message}")
+                    }
+                    
+                    // Strategy 2: Use /proc/self/fd trick
+                    try {
+                        val pfd = reactApplicationContext.contentResolver.openFileDescriptor(uri, "r")
+                        pfd?.use {
+                            val fdPath = "/proc/self/fd/${it.fd}"
+                            // Resolve the symlink to get the real path
+                            val realPath = java.io.File(fdPath).canonicalPath
+                            if (realPath != fdPath && !realPath.startsWith("/proc")) {
+                                Log.d(TAG, "Resolved via /proc/self/fd: $realPath")
+                                return@withContext realPath
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "/proc/self/fd resolution failed: ${e.message}")
+                    }
+                    
+                    // Strategy 3: DocumentFile absolute path (deprecated but may work)
+                    try {
+                        val docFile = DocumentFile.fromSingleUri(reactApplicationContext, uri)
+                        val absPath = docFile?.uri?.path
+                        if (!absPath.isNullOrEmpty() && !absPath.startsWith("/document/")) {
+                            Log.d(TAG, "Resolved via DocumentFile: $absPath")
+                            return@withContext absPath
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "DocumentFile resolution failed: ${e.message}")
+                    }
+                    
+                    Log.w(TAG, "Could not resolve real path for: $contentUri")
+                    null
+                }
+                
+                if (result != null) {
+                    promise.resolve(result)
+                } else {
+                    promise.reject("SAF_PATH_RESOLUTION_ERROR", "Cannot resolve real path for: $contentUri")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to get real path for SAF URI", e)
+                promise.reject("SAF_PATH_RESOLUTION_ERROR", e.message)
+            }
+        }
+    }
+
     companion object {
         private const val TAG = "DownloadModule"
         private fun getWorkName(downloadId: String) = "download_$downloadId"

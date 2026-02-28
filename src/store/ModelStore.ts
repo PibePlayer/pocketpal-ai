@@ -765,16 +765,30 @@ class ModelStore {
       }
 
       if (isSafBaseDir) {
-        // For SAF URIs, use createSafFile to create the file in the SAF tree
+        // For SAF URIs, create the file in the SAF tree and resolve to real path.
+        // createSafFile returns a content:// URI; getSafFileRealPath converts it
+        // to a real filesystem path that llama.rn and RNFS can use.
         const relativePath = `models/preset/${author}/${repo}/${model.filename}`;
         console.log(
           'getModelFullPath: creating SAF file for preset model:',
           relativePath,
         );
-        return await NativeDownloadModule.createSafFile(
+        const contentUri = await NativeDownloadModule.createSafFile(
           modelsBaseDir,
           relativePath,
         );
+        try {
+          const realPath =
+            await NativeDownloadModule.getSafFileRealPath(contentUri);
+          console.log('getModelFullPath: resolved SAF preset path:', realPath);
+          return realPath;
+        } catch (err) {
+          console.warn(
+            'getModelFullPath: could not resolve SAF real path, using content URI:',
+            err,
+          );
+          return contentUri;
+        }
       }
 
       // New path structure includes repository name
@@ -822,16 +836,28 @@ class ModelStore {
       }
 
       if (isSafBaseDir) {
-        // For SAF URIs, use createSafFile to create the file in the SAF tree
+        // For SAF URIs, create the file in the SAF tree and resolve to real path.
         const relativePath = `models/hf/${author}/${repo}/${model.filename}`;
         console.log(
           'getModelFullPath: creating SAF file for HF model:',
           relativePath,
         );
-        return await NativeDownloadModule.createSafFile(
+        const contentUri = await NativeDownloadModule.createSafFile(
           modelsBaseDir,
           relativePath,
         );
+        try {
+          const realPath =
+            await NativeDownloadModule.getSafFileRealPath(contentUri);
+          console.log('getModelFullPath: resolved SAF HF path:', realPath);
+          return realPath;
+        } catch (err) {
+          console.warn(
+            'getModelFullPath: could not resolve SAF real path, using content URI:',
+            err,
+          );
+          return contentUri;
+        }
       }
 
       // New path structure includes repository name
@@ -857,17 +883,37 @@ class ModelStore {
     // Fallback (shouldn't reach here)
     console.error('should not reach here. model: ', model);
     if (isSafBaseDir) {
-      return await NativeDownloadModule.createSafFile(
+      const contentUri = await NativeDownloadModule.createSafFile(
         modelsBaseDir,
         model.filename,
       );
+      try {
+        return await NativeDownloadModule.getSafFileRealPath(contentUri);
+      } catch {
+        return contentUri;
+      }
     }
     return `${modelsBaseDir}/${model.filename}`;
   };
 
   async checkFileExists(model: Model) {
     const filePath = await this.getModelFullPath(model);
-    const exists = await RNFS.exists(filePath);
+    let exists = await RNFS.exists(filePath);
+
+    // For SAF-downloaded models, also check that the file has non-zero size.
+    // createSafFile creates an empty placeholder file, so we need to verify
+    // the file actually contains data (i.e., the download completed).
+    if (exists) {
+      try {
+        const stat = await RNFS.stat(filePath);
+        if (stat.size === 0) {
+          exists = false;
+        }
+      } catch (err) {
+        console.log('checkFileExists: stat failed:', err);
+        exists = false;
+      }
+    }
 
     // Don't mark as downloaded if currently downloading
     if (exists && !downloadManager.isDownloading(model.id)) {
@@ -972,7 +1018,36 @@ class ModelStore {
     }
 
     try {
-      const destinationPath = await this.getModelFullPath(model);
+      // For SAF (Android 10+ external storage), we need the content:// URI for
+      // the download destination (DownloadWorker uses ContentResolver.openOutputStream).
+      // For regular paths, use getModelFullPath directly.
+      const modelsBaseDir = uiStore.modelsBaseDir;
+      const isSafBaseDir =
+        Platform.OS === 'android' && modelsBaseDir.startsWith('content://');
+
+      let destinationPath: string;
+      if (isSafBaseDir && model.filename) {
+        // Get the content:// URI for the download destination
+        const author = model.author || 'unknown';
+        const repo = model.repo || inferRepoFromModelId(model.id) || 'unknown';
+        const relPath =
+          model.origin === ModelOrigin.PRESET
+            ? `models/preset/${author}/${repo}/${model.filename}`
+            : model.origin === ModelOrigin.HF
+              ? `models/hf/${author}/${repo}/${model.filename}`
+              : model.filename;
+        destinationPath = await NativeDownloadModule.createSafFile(
+          modelsBaseDir,
+          relPath,
+        );
+        console.log(
+          'checkSpaceAndDownload: SAF download destination:',
+          destinationPath,
+        );
+      } else {
+        destinationPath = await this.getModelFullPath(model);
+      }
+
       const authToken = hfStore.shouldUseToken ? hfStore.hfToken : null;
       await downloadManager.startDownload(model, destinationPath, authToken);
 

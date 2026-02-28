@@ -50,6 +50,11 @@ export interface Spec extends TurboModule {
   // relativePath: path relative to the tree root, e.g. "models/hf/author/repo/model.gguf"
   // Returns the content:// URI of the created (or existing) file.
   createSafFile(treeUri: string, relativePath: string): Promise<string>;
+
+  // Resolves a SAF content:// URI to a real filesystem path.
+  // Needed for llama.rn which requires a real path to load models.
+  // Returns the real path (e.g. /storage/emulated/0/Download/models/...) or throws.
+  getSafFileRealPath(contentUri: string): Promise<string>;
 }
 
 // Only load the module on Android
