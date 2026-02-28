@@ -942,8 +942,26 @@ class ModelStore {
 
   async checkFileExists(model: Model) {
     console.log('[ModelStore] checkFileExists called for model:', model.id);
-    const filePath = await this.getModelFullPath(model);
+    let filePath = await this.getModelFullPath(model);
     console.log('[ModelStore] checkFileExists path:', filePath);
+
+    // For SAF content:// URIs, try to resolve to real path for proper existence check
+    // getModelFullPath may return a content:// URI when getSafFileRealPath fails
+    let isSafUri = Platform.OS === 'android' && filePath.startsWith('content://');
+    let realPath: string | null = null;
+
+    if (isSafUri) {
+      console.log('[ModelStore] checkFileExists: resolving SAF URI to real path');
+      try {
+        realPath = await NativeDownloadModule.getSafFileRealPath(filePath);
+        console.log('[ModelStore] checkFileExists: resolved to real path:', realPath);
+        filePath = realPath;
+      } catch (err) {
+        console.warn('[ModelStore] checkFileExists: could not resolve SAF URI, checking URI directly:', err);
+        // Fall through - we'll try to check the content:// URI directly
+      }
+    }
+
     let exists = await RNFS.exists(filePath);
     console.log('[ModelStore] checkFileExists result:', exists);
 
