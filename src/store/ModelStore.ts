@@ -169,7 +169,10 @@ class ModelStore {
         }
       },
       onComplete: async modelId => {
-        console.log('[ModelStore] Download onComplete called for model:', modelId);
+        console.log(
+          '[ModelStore] Download onComplete called for model:',
+          modelId,
+        );
         const model = this.models.find(m => m.id === modelId);
         if (model) {
           console.log('[ModelStore] Found model, updating state:', model.id);
@@ -181,10 +184,16 @@ class ModelStore {
           // Fetch and persist GGUF metadata after download completes
           // Skip for projection models (CLIP) - they have different metadata structure
           if (model.modelType !== ModelType.PROJECTION) {
-            console.log('[ModelStore] Fetching GGUF metadata for model:', model.id);
+            console.log(
+              '[ModelStore] Fetching GGUF metadata for model:',
+              model.id,
+            );
             try {
               await this.fetchAndPersistGGUFMetadata(model);
-              console.log('[ModelStore] GGUF metadata fetched successfully for model:', model.id);
+              console.log(
+                '[ModelStore] GGUF metadata fetched successfully for model:',
+                model.id,
+              );
             } catch (err) {
               console.error('[ModelStore] Error fetching GGUF metadata:', err);
             }
@@ -724,7 +733,12 @@ class ModelStore {
    * @throws Error if filename is undefined or if fullPath is undefined for local models
    */
   getModelFullPath = async (model: Model): Promise<string> => {
-    console.log('[ModelStore] getModelFullPath called for model:', model.id, 'origin:', model.origin);
+    console.log(
+      '[ModelStore] getModelFullPath called for model:',
+      model.id,
+      'origin:',
+      model.origin,
+    );
     // For local models, use the fullPath
     if (model.isLocal || model.origin === ModelOrigin.LOCAL) {
       if (!model.fullPath) {
@@ -801,7 +815,10 @@ class ModelStore {
         try {
           const realPath =
             await NativeDownloadModule.getSafFileRealPath(contentUri);
-          console.log('[ModelStore] getModelFullPath: resolved SAF preset path:', realPath);
+          console.log(
+            '[ModelStore] getModelFullPath: resolved SAF preset path:',
+            realPath,
+          );
           return realPath;
         } catch (err) {
           console.warn(
@@ -820,7 +837,10 @@ class ModelStore {
       // If a custom dir is configured, also check if file already exists there
       // (handles re-downloads after changing the download directory)
       if (modelsBaseDir !== RNFS.DocumentDirectoryPath) {
-        console.log('[ModelStore] Checking custom dir for existing file:', newPath);
+        console.log(
+          '[ModelStore] Checking custom dir for existing file:',
+          newPath,
+        );
         try {
           const exists = await RNFS.exists(newPath);
           console.log('[ModelStore] Custom dir file exists:', exists);
@@ -828,7 +848,10 @@ class ModelStore {
             return newPath;
           }
         } catch (err) {
-          console.log('[ModelStore] Error checking custom dir preset path:', err);
+          console.log(
+            '[ModelStore] Error checking custom dir preset path:',
+            err,
+          );
         }
       }
 
@@ -882,7 +905,10 @@ class ModelStore {
         try {
           const realPath =
             await NativeDownloadModule.getSafFileRealPath(contentUri);
-          console.log('[ModelStore] getModelFullPath: resolved SAF HF path:', realPath);
+          console.log(
+            '[ModelStore] getModelFullPath: resolved SAF HF path:',
+            realPath,
+          );
           return realPath;
         } catch (err) {
           console.warn(
@@ -901,7 +927,10 @@ class ModelStore {
       // If a custom dir is configured, also check if file already exists there
       // (handles re-downloads after changing the download directory)
       if (modelsBaseDir !== RNFS.DocumentDirectoryPath) {
-        console.log('[ModelStore] Checking custom dir for existing HF file:', newPath);
+        console.log(
+          '[ModelStore] Checking custom dir for existing HF file:',
+          newPath,
+        );
         try {
           const exists = await RNFS.exists(newPath);
           console.log('[ModelStore] Custom dir HF file exists:', exists);
@@ -921,13 +950,17 @@ class ModelStore {
     // Fallback (shouldn't reach here)
     console.error('[ModelStore] should not reach here. model: ', model);
     if (isSafBaseDir) {
-      console.log('[ModelStore] Fallback: creating SAF file for:', model.filename);
+      console.log(
+        '[ModelStore] Fallback: creating SAF file for:',
+        model.filename,
+      );
       const contentUri = await NativeDownloadModule.createSafFile(
         modelsBaseDir,
         model.filename,
       );
       try {
-        const realPath = await NativeDownloadModule.getSafFileRealPath(contentUri);
+        const realPath =
+          await NativeDownloadModule.getSafFileRealPath(contentUri);
         console.log('[ModelStore] Fallback: resolved SAF path:', realPath);
         return realPath;
       } catch {
@@ -947,17 +980,26 @@ class ModelStore {
 
     // For SAF content:// URIs, try to resolve to real path for proper existence check
     // getModelFullPath may return a content:// URI when getSafFileRealPath fails
-    let isSafUri = Platform.OS === 'android' && filePath.startsWith('content://');
+    let isSafUri =
+      Platform.OS === 'android' && filePath.startsWith('content://');
     let realPath: string | null = null;
 
     if (isSafUri) {
-      console.log('[ModelStore] checkFileExists: resolving SAF URI to real path');
+      console.log(
+        '[ModelStore] checkFileExists: resolving SAF URI to real path',
+      );
       try {
         realPath = await NativeDownloadModule.getSafFileRealPath(filePath);
-        console.log('[ModelStore] checkFileExists: resolved to real path:', realPath);
+        console.log(
+          '[ModelStore] checkFileExists: resolved to real path:',
+          realPath,
+        );
         filePath = realPath;
       } catch (err) {
-        console.warn('[ModelStore] checkFileExists: could not resolve SAF URI, checking URI directly:', err);
+        console.warn(
+          '[ModelStore] checkFileExists: could not resolve SAF URI, checking URI directly:',
+          err,
+        );
         // Fall through - we'll try to check the content:// URI directly
       }
     }
@@ -1296,7 +1338,10 @@ class ModelStore {
    */
   fetchAndPersistGGUFMetadata = async (model: Model) => {
     try {
-      console.log('[ModelStore] fetchAndPersistGGUFMetadata called for model:', model.id);
+      console.log(
+        '[ModelStore] fetchAndPersistGGUFMetadata called for model:',
+        model.id,
+      );
       const filePath = await this.getModelFullPath(model);
       console.log('[ModelStore] getModelFullPath returned:', filePath);
       if (!filePath) {
@@ -1314,9 +1359,15 @@ class ModelStore {
         return;
       }
 
-      console.log('[ModelStore] Calling loadLlamaModelInfo with path:', filePath);
+      console.log(
+        '[ModelStore] Calling loadLlamaModelInfo with path:',
+        filePath,
+      );
       const modelInfo = await loadLlamaModelInfo(filePath);
-      console.log('[ModelStore] loadLlamaModelInfo returned:', modelInfo ? 'valid' : 'null/undefined');
+      console.log(
+        '[ModelStore] loadLlamaModelInfo returned:',
+        modelInfo ? 'valid' : 'null/undefined',
+      );
       if (!modelInfo || typeof modelInfo !== 'object') {
         console.warn('[ModelStore] Invalid model info returned');
         return;

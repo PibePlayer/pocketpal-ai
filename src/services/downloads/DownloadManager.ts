@@ -128,9 +128,15 @@ export class DownloadManager {
           };
           // Ensure callback is called before removing the job
           try {
-            console.log(`${TAG}: Calling onComplete callback for model:`, job.model.id);
+            console.log(
+              `${TAG}: Calling onComplete callback for model:`,
+              job.model.id,
+            );
             this.callbacks.onComplete?.(job.model.id);
-            console.log(`${TAG}: onComplete callback finished for model:`, job.model.id);
+            console.log(
+              `${TAG}: onComplete callback finished for model:`,
+              job.model.id,
+            );
           } catch (err) {
             console.error(`${TAG}: Error in onComplete callback:`, err);
           }
