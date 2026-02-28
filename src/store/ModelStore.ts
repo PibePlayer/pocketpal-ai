@@ -168,6 +168,7 @@ class ModelStore {
         }
       },
       onComplete: async modelId => {
+        console.log('[ModelStore] Download completed for model:', modelId);
         const model = this.models.find(m => m.id === modelId);
         if (model) {
           runInAction(() => {
@@ -178,7 +179,16 @@ class ModelStore {
           // Fetch and persist GGUF metadata after download completes
           // Skip for projection models (CLIP) - they have different metadata structure
           if (model.modelType !== ModelType.PROJECTION) {
-            await this.fetchAndPersistGGUFMetadata(model);
+            try {
+              await this.fetchAndPersistGGUFMetadata(model);
+            } catch (error) {
+              console.error(
+                '[ModelStore] Error fetching GGUF metadata after download:',
+                error,
+              );
+              // Don't re-throw - we've already marked the model as downloaded
+              // The metadata can be fetched later if needed
+            }
           }
         }
       },
@@ -709,11 +719,15 @@ class ModelStore {
    * @throws Error if filename is undefined or if fullPath is undefined for local models
    */
   getModelFullPath = async (model: Model): Promise<string> => {
+    // Debug: Log when getting model full path
+    console.log('[ModelStore] getModelFullPath called for model:', model.id, 'origin:', model.origin);
+    
     // For local models, use the fullPath
     if (model.isLocal || model.origin === ModelOrigin.LOCAL) {
       if (!model.fullPath) {
         throw new Error('Full path is undefined for local model');
       }
+      console.log('[ModelStore] Returning local fullPath:', model.fullPath);
       return model.fullPath;
     }
 
@@ -747,6 +761,7 @@ class ModelStore {
       // Check if file exists at old path (for backwards compatibility)
       try {
         if (await RNFS.exists(oldPath)) {
+          console.log('[ModelStore] Found preset model at old path:', oldPath);
           return oldPath;
         }
       } catch (err) {
@@ -754,6 +769,7 @@ class ModelStore {
       }
 
       // Otherwise use new path
+      console.log('[ModelStore] Returning new preset path:', newPath);
       return newPath;
     }
 
@@ -777,6 +793,7 @@ class ModelStore {
       // This handles: existing downloads, models after reset, models after app update
       try {
         if (await RNFS.exists(oldPath)) {
+          console.log('[ModelStore] Found HF model at old path:', oldPath);
           return oldPath;
         }
       } catch (err) {
@@ -784,6 +801,7 @@ class ModelStore {
       }
 
       // Otherwise use new path
+      console.log('[ModelStore] Returning new HF path:', newPath);
       return newPath;
     }
 
@@ -900,6 +918,7 @@ class ModelStore {
 
     try {
       const destinationPath = await this.getModelFullPath(model);
+      console.log('[ModelStore] Starting download - destination path:', destinationPath);
       const authToken = hfStore.shouldUseToken ? hfStore.hfToken : null;
       await downloadManager.startDownload(model, destinationPath, authToken);
 
@@ -1084,6 +1103,7 @@ class ModelStore {
   fetchAndPersistGGUFMetadata = async (model: Model) => {
     try {
       const filePath = await this.getModelFullPath(model);
+      console.log('[ModelStore] fetchAndPersistGGUFMetadata - filePath:', filePath);
       if (!filePath) {
         console.warn(
           '[ModelStore] Cannot fetch GGUF metadata: model path is undefined',
@@ -1091,11 +1111,35 @@ class ModelStore {
         return;
       }
 
-      const modelInfo = await loadLlamaModelInfo(filePath);
+      // Check if file exists before trying to load metadata
+      const fileExists = await RNFS.exists(filePath);
+      console.log('[ModelStore] File exists at path:', filePath, fileExists);
+      if (!fileExists) {
+        console.warn(
+          '[ModelStore] Cannot fetch GGUF metadata: file does not exist at path:',
+          filePath,
+        );
+        return;
+      }
+
+      let modelInfo;
+      try {
+        modelInfo = await loadLlamaModelInfo(filePath);
+      } catch (error) {
+        console.error(
+          '[ModelStore] Error loading GGUF metadata:',
+          error,
+        );
+        // Don't crash - just skip metadata extraction
+        return;
+      }
+
       if (!modelInfo || typeof modelInfo !== 'object') {
         console.warn('[ModelStore] Invalid model info returned');
         return;
       }
+
+      console.log('[ModelStore] Successfully loaded GGUF metadata for model:', model.id);
 
       // Default vocab sizes by architecture (matches Python memory_estimator.py)
       const ARCH_DEFAULT_VOCAB: Record<string, number> = {
