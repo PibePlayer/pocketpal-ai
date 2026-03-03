@@ -173,33 +173,43 @@ class ModelStore {
           '[ModelStore] Download onComplete called for model:',
           modelId,
         );
-        const model = this.models.find(m => m.id === modelId);
-        if (model) {
-          console.log('[ModelStore] Found model, updating state:', model.id);
-          runInAction(() => {
-            model.progress = 100;
-            model.isDownloaded = true;
-          });
+        try {
+          const model = this.models.find(m => m.id === modelId);
+          if (model) {
+            console.log('[ModelStore] Found model, updating state:', model.id);
+            runInAction(() => {
+              model.progress = 100;
+              model.isDownloaded = true;
+            });
 
-          // Fetch and persist GGUF metadata after download completes
-          // Skip for projection models (CLIP) - they have different metadata structure
-          if (model.modelType !== ModelType.PROJECTION) {
-            console.log(
-              '[ModelStore] Fetching GGUF metadata for model:',
-              model.id,
-            );
-            try {
-              await this.fetchAndPersistGGUFMetadata(model);
+            // Fetch and persist GGUF metadata after download completes
+            // Skip for projection models (CLIP) - they have different metadata structure
+            if (model.modelType !== ModelType.PROJECTION) {
               console.log(
-                '[ModelStore] GGUF metadata fetched successfully for model:',
+                '[ModelStore] Fetching GGUF metadata for model:',
                 model.id,
               );
-            } catch (err) {
-              console.error('[ModelStore] Error fetching GGUF metadata:', err);
+              try {
+                await this.fetchAndPersistGGUFMetadata(model);
+                console.log(
+                  '[ModelStore] GGUF metadata fetched successfully for model:',
+                  model.id,
+                );
+              } catch (err) {
+                console.error(
+                  '[ModelStore] Error fetching GGUF metadata:',
+                  err,
+                );
+              }
             }
+          } else {
+            console.warn(
+              '[ModelStore] Model not found for onComplete:',
+              modelId,
+            );
           }
-        } else {
-          console.warn('[ModelStore] Model not found for onComplete:', modelId);
+        } catch (err) {
+          console.error('[ModelStore] Error in onComplete callback:', err);
         }
       },
       onError: (modelId, error) => {
@@ -974,75 +984,87 @@ class ModelStore {
   };
 
   async checkFileExists(model: Model) {
-    console.log('[ModelStore] checkFileExists called for model:', model.id);
-    let filePath = await this.getModelFullPath(model);
-    console.log('[ModelStore] checkFileExists path:', filePath);
+    try {
+      console.log('[ModelStore] checkFileExists called for model:', model.id);
+      let filePath = await this.getModelFullPath(model);
+      console.log('[ModelStore] checkFileExists path:', filePath);
 
-    // For SAF content:// URIs, try to resolve to real path for proper existence check
-    // getModelFullPath may return a content:// URI when getSafFileRealPath fails
-    let isSafUri =
-      Platform.OS === 'android' && filePath.startsWith('content://');
-    let realPath: string | null = null;
+      // For SAF content:// URIs, try to resolve to real path for proper existence check
+      // getModelFullPath may return a content:// URI when getSafFileRealPath fails
+      let isSafUri =
+        Platform.OS === 'android' && filePath.startsWith('content://');
+      let realPath: string | null = null;
 
-    if (isSafUri) {
-      console.log(
-        '[ModelStore] checkFileExists: resolving SAF URI to real path',
-      );
-      try {
-        realPath = await NativeDownloadModule.getSafFileRealPath(filePath);
+      if (isSafUri) {
         console.log(
-          '[ModelStore] checkFileExists: resolved to real path:',
-          realPath,
+          '[ModelStore] checkFileExists: resolving SAF URI to real path',
         );
-        filePath = realPath;
-      } catch (err) {
-        console.warn(
-          '[ModelStore] checkFileExists: could not resolve SAF URI, checking URI directly:',
-          err,
-        );
-        // Fall through - we'll try to check the content:// URI directly
+        try {
+          realPath = await NativeDownloadModule.getSafFileRealPath(filePath);
+          console.log(
+            '[ModelStore] checkFileExists: resolved to real path:',
+            realPath,
+          );
+          filePath = realPath;
+        } catch (err) {
+          console.warn(
+            '[ModelStore] checkFileExists: could not resolve SAF URI, checking URI directly:',
+            err,
+          );
+          // Fall through - we'll try to check the content:// URI directly
+        }
       }
-    }
 
-    let exists = await RNFS.exists(filePath);
-    console.log('[ModelStore] checkFileExists result:', exists);
+      let exists = await RNFS.exists(filePath);
+      console.log('[ModelStore] checkFileExists result:', exists);
 
-    // For SAF-downloaded models, also check that the file has non-zero size.
-    // createSafFile creates an empty placeholder file, so we need to verify
-    // the file actually contains data (i.e., the download completed).
-    if (exists) {
-      try {
-        const stat = await RNFS.stat(filePath);
-        if (stat.size === 0) {
+      // For SAF-downloaded models, also check that the file has non-zero size.
+      // createSafFile creates an empty placeholder file, so we need to verify
+      // the file actually contains data (i.e., the download completed).
+      if (exists) {
+        try {
+          const stat = await RNFS.stat(filePath);
+          if (stat.size === 0) {
+            exists = false;
+          }
+        } catch (err) {
+          console.log('checkFileExists: stat failed:', err);
           exists = false;
         }
-      } catch (err) {
-        console.log('checkFileExists: stat failed:', err);
-        exists = false;
       }
-    }
 
-    // Don't mark as downloaded if currently downloading
-    if (exists && !downloadManager.isDownloading(model.id)) {
-      if (!model.isDownloaded) {
-        console.log(
-          'checkFileExists: marking as downloaded - this should not happen:',
-          model.id,
-        );
+      // Don't mark as downloaded if currently downloading
+      if (exists && !downloadManager.isDownloading(model.id)) {
+        if (!model.isDownloaded) {
+          console.log(
+            'checkFileExists: marking as downloaded - this should not happen:',
+            model.id,
+          );
+          runInAction(() => {
+            model.isDownloaded = true;
+          });
+        }
+      } else {
         runInAction(() => {
-          model.isDownloaded = true;
+          model.isDownloaded = false;
         });
       }
-    } else {
-      runInAction(() => {
-        model.isDownloaded = false;
-      });
+    } catch (err) {
+      console.error('[ModelStore] Error in checkFileExists:', err);
     }
   }
 
   refreshDownloadStatuses = async () => {
-    this.models.forEach(model => {
-      this.checkFileExists(model);
+    this.models.forEach(async model => {
+      try {
+        await this.checkFileExists(model);
+      } catch (err) {
+        console.error(
+          '[ModelStore] Error checking file existence for model:',
+          model.id,
+          err,
+        );
+      }
     });
   };
 
