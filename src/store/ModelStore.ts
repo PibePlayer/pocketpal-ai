@@ -1055,21 +1055,29 @@ class ModelStore {
   }
 
   refreshDownloadStatuses = async () => {
-    this.models.forEach(async model => {
-      try {
-        await this.checkFileExists(model);
-      } catch (err) {
-        console.error(
-          '[ModelStore] Error checking file existence for model:',
-          model.id,
-          err,
-        );
+    try {
+      for (const model of this.models) {
+        try {
+          await this.checkFileExists(model);
+        } catch (err) {
+          console.error(
+            '[ModelStore] Error checking file existence for model:',
+            model.id,
+            err,
+          );
+        }
       }
-    });
+    } catch (err) {
+      console.error('[ModelStore] Error in refreshDownloadStatuses:', err);
+    }
   };
 
   initializeDownloadStatus = async () => {
-    await this.refreshDownloadStatuses();
+    try {
+      await this.refreshDownloadStatuses();
+    } catch (err) {
+      console.error('[ModelStore] Error in initializeDownloadStatus:', err);
+    }
   };
 
   removeInvalidLocalModels = () => {
