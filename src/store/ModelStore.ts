@@ -1372,13 +1372,35 @@ class ModelStore {
         '[ModelStore] fetchAndPersistGGUFMetadata called for model:',
         model.id,
       );
-      const filePath = await this.getModelFullPath(model);
+      let filePath = await this.getModelFullPath(model);
       console.log('[ModelStore] getModelFullPath returned:', filePath);
       if (!filePath) {
         console.warn(
           '[ModelStore] Cannot fetch GGUF metadata: model path is undefined',
         );
         return;
+      }
+
+      // For SAF content:// URIs, try to resolve to real path for proper file operations
+      let isSafUri =
+        Platform.OS === 'android' && filePath.startsWith('content://');
+      if (isSafUri) {
+        console.log(
+          '[ModelStore] fetchAndPersistGGUFMetadata: resolving SAF URI to real path',
+        );
+        try {
+          filePath = await NativeDownloadModule.getSafFileRealPath(filePath);
+          console.log(
+            '[ModelStore] fetchAndPersistGGUFMetadata: resolved to real path:',
+            filePath,
+          );
+        } catch (err) {
+          console.warn(
+            '[ModelStore] fetchAndPersistGGUFMetadata: could not resolve SAF URI, using content URI directly:',
+            err,
+          );
+          // Continue with content URI - might still work
+        }
       }
 
       // Check if file exists before trying to load
